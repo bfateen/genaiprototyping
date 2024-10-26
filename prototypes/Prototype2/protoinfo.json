@@ -1,0 +1,20 @@
+{
+    "title": "Chat with your documents with Knowledge Base",
+    "description": "Ready-to-deploy REST API with authentication and database integration",
+    "icon": "/api/placeholder/48/48",
+    "videoUrl": "https://example.com/video1",
+    "services": [
+        "Lambda",
+        "API Gateway",
+        "DynamoDB",
+        "Cognito"
+    ],
+    "estimatedCost": "$12/month",
+    "templates": [
+        {
+            "name":"template.yaml",
+            "inputs":[],
+            "outputs": []
+        }
+    ]
+}
