@@ -5,7 +5,7 @@ Resources:
   S3Bucket:
     Type: 'AWS::S3::Bucket'
     Properties:
-      BucketName: ade-bucket-name-2317
+      BucketName: ade-bucket-name-2318
       VersioningConfiguration:
         Status: Enabled
       PublicAccessBlockConfiguration:
