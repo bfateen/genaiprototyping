@@ -4,6 +4,7 @@
     "icon": "/api/placeholder/48/48",
     "videoUrl": "https://example.com/video1",
     "services": [
+        "S3",
         "Lambda",
         "API Gateway",
         "DynamoDB",
