@@ -37,9 +37,9 @@ Resources:
                 'aws:SecureTransport': false
 
 Outputs:
-  BucketName:
+  S3_BucketName:
     Description: 'Name of the created S3 bucket'
     Value: !Ref S3Bucket
-  BucketARN:
+  S3_BucketARN:
     Description: 'ARN of the created S3 bucket'
     Value: !GetAtt S3Bucket.Arn
