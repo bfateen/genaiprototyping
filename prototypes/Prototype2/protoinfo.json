@@ -3,12 +3,24 @@
     "description": "Ready-to-deploy REST API with authentication and database integration",
     "icon": "/api/placeholder/48/48",
     "videoUrl": "https://example.com/video1",
-    "services": [
-        "Lambda",
-        "API Gateway",
-        "DynamoDB",
-        "Cognito"
-    ],
+   "services": [
+    {
+        "name": "Lambda",
+        "desc": ""
+    },
+    {
+        "name": "API Gateway",
+        "desc": ""
+    },
+    {
+        "dame": "DynamoDB",
+        "desc": ""
+    },
+    {
+        "name": "Cognito",
+        "desc": ""
+    }
+],,
     "estimatedCost": "$12/month",
     "templates": [
         {
