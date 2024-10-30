@@ -418,9 +418,11 @@ Resources:
         </html>
 
 Outputs:
-  BucketName:
+
+  S3BucketName:
     Description: 'Name of the created S3 bucket'
     Value: !Ref BucketName
+
   FrontendURL:
     Description: URL for the S3 static website
     Value: !GetAtt WebsiteBucket.WebsiteURL
