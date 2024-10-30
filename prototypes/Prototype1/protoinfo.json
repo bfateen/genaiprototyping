@@ -6,17 +6,17 @@
     "videoUrl": "https://example.com/video1",
     "services": [
         {
-            "name":"Lambda",
+            "name":"S3",
             "desc":""
         },
         {
             "name": "API Gateway",
             "desc": ""
         },{
-            "dame": "DynamoDB",
+            "dame": "Lambda",
             "desc": ""
         },{
-            "name": "Cognito",
+            "name": "Bedrock",
             "desc": ""
         }
     ],
