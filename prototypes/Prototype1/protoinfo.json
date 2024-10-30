@@ -13,7 +13,7 @@
             "name": "API Gateway",
             "desc": ""
         },{
-            "dame": "Lambda",
+            "name": "Lambda",
             "desc": ""
         },{
             "name": "Bedrock",
