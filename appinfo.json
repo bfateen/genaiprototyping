@@ -2,5 +2,78 @@
     "title": "Generative AI Prototype Environment",
     "description": "Launch Gen AI prototypes with one click",
     "icon": "/api/placeholder/48/48",
-    "videoUrl": "https://example.com/video1"
+    "videoUrl": "https://example.com/video1",
+    "explainers":
+    [
+        {
+            "name":"S3 (Simple Storage Service)",
+            "term":"s3",
+            "videoURL":"",
+            "description": "",
+            "links": [""]
+        },
+        {
+            "name": "Lambda",
+            "term": "lambda",
+            "videoURL": "",
+            "description": "",
+            "links": [
+                ""
+            ]
+        },
+        {
+            "name": "API Gateway",
+            "term": "api gateway",
+            "videoURL": "",
+            "description": "",
+            "links": [
+                ""
+            ]
+        },
+        {
+            "name": "Amazon Bedrock",
+            "term": "bedrock",
+            "videoURL": "",
+            "description": "",
+            "links": [
+                ""
+            ]
+        },
+        {
+            "name": "Knowledge Base",
+            "term": "knowledge base",
+            "videoURL": "",
+            "description": "",
+            "links": [
+                ""
+            ]
+        },
+        {
+            "name": "Agents",
+            "term": "agent",
+            "videoURL": "",
+            "description": "",
+            "links": [
+                ""
+            ]
+        },
+        {
+            "name": "Prompt Engineering",
+            "term": "prompt engineering",
+            "videoURL": "",
+            "description": "",
+            "links": [
+                ""
+            ]
+        },
+        {
+            "name": "Retrieval Augmented Genertion",
+            "term": "rag",
+            "videoURL": "",
+            "description": "",
+            "links": [
+                ""
+            ]
+        }
+    ]
 }
