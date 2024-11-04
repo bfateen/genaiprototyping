@@ -1,50 +1,327 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'This CloudFormation template installs the full LEAP environment with a frontend S3 WebApp, Lambda functions, API Gateway, enhanced CORS, error handling and IAM permissions'
+Description: 'This CloudFormation template installes the full LEAP environment with a secure Cognito endpoint, frontend S3 WebApp, Lambda functions, API Gateway, enhanced CORS, error handling and IAM permissions'
 
 Parameters:
-  BucketName:
+  AdminEmail:
     Type: String
-    Description: Name of the S3 bucket to create for hosting the web app
-    Default: 'leap-deploy-webapp-bucket'
-
-Conditions:
-  UseProvidedBucketName: !Not [!Equals [!Ref BucketName, 'leap-deploy-webapp-bucket']]
+    Description: Email address for the admin user
+    Default: admin@example.com
+  
+  InitialPassword:
+    Type: String
+    Description: Initial password for the admin user (must meet Cognito requirements)
+    Default: Initial123!
+    NoEcho: true
+    
+  
 
 Resources:
-  WebAppBucket:
-    Type: 'AWS::S3::Bucket'
+  # S3 Bucket
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
     Properties:
-      BucketName: !If 
-        - UseProvidedBucketName
-        - !Ref BucketName
-        - !Sub '${AWS::StackName}-${AWS::AccountId}-${AWS::Region}'
-      WebsiteConfiguration:
-        IndexDocument: index.html
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: false
-        BlockPublicPolicy: false
-        IgnorePublicAcls: false
-        RestrictPublicBuckets: false
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
 
-  WebAppBucketPolicy:
-    Type: 'AWS::S3::BucketPolicy'
+  # Cognito User Pool with Hosted UI
+  UserPool:
+    Type: AWS::Cognito::UserPool
     Properties:
-      Bucket: !Ref WebAppBucket
-      PolicyDocument:
+      UserPoolName: !Sub ${AWS::StackName}-users
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      UsernameAttributes:
+        - email
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub ${AWS::StackName}-${AWS::Region}-${AWS::AccountId}-auth
+      UserPoolId: !Ref UserPool
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub ${AWS::StackName}-client
+      GenerateSecret: false
+      CallbackURLs: 
+        - !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/callback
+      LogoutURLs:
+        - !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/signout
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+      AllowedOAuthFlowsUserPoolClient: true
+      SupportedIdentityProviders:
+        - COGNITO
+
+  # Lambda for URL signing and callback handling
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: PublicReadGetObject
-            Effect: Allow
-            Principal: '*'
-            Action: 's3:GetObject'
-            Resource: !Sub 'arn:aws:s3:::${WebAppBucket}/*'
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: 'arn:aws:logs:*:*:*'
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                Resource: 
+                  - !Sub 'arn:aws:s3:::${WebsiteBucket}'
+                  - !Sub 'arn:aws:s3:::${WebsiteBucket}/*'
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:TagResource
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:DeleteRole
+                  - iam:DeleteRolePolicy
+                  - iam:GetRole
+                  - iam:TagRole
+                  - iam:CreateUser
+                  - iam:DeleteUser
+                  - iam:GetUser
+                  - iam:ListUsers
+                  - iam:UpdateUser
+                  - iam:TagUser
+                  - iam:UntagUser
+                  - iam:CreateLoginProfile
+                  - iam:DeleteLoginProfile
+                  - iam:GetLoginProfile
+                  - iam:UpdateLoginProfile
+                  - iam:CreateAccessKey
+                  - iam:DeleteAccessKey
+                  - iam:ListAccessKeys
+                  - iam:AttachUserPolicy
+                  - iam:DetachUserPolicy
+                  - iam:ListAttachedUserPolicies
+                  - iam:PutUserPolicy
+                  - iam:DeleteUserPolicy
+                  - iam:ListUserPolicies
+                  - iam:PassRole          
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - tag:GetResources
+                  - tag:TagResources
+                  - tag:UntagResources
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 's3:*'
+                  - 'ApiGateway:*'
+                  - 'bedrock:*'
+                  - 'lambda:*'
+                Resource: '*'
+
+  AuthHandlerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import os
+          import urllib.parse
+          
+          def handler(event, context):
+              path = event['path']
+              
+              if path == '/callback':
+                  # Handle OAuth callback
+                  code = event['queryStringParameters'].get('code')
+                  if not code:
+                      return {
+                          'statusCode': 302,
+                          'headers': {
+                              'Location': f"https://{os.environ['COGNITO_DOMAIN']}/login"
+                          }
+                      }
+                  
+                  # Generate signed URL for protected content
+                  s3 = boto3.client('s3')
+                  url = s3.generate_presigned_url(
+                      'get_object',
+                      Params={
+                          'Bucket': os.environ['BUCKET_NAME'],
+                          'Key': 'protected.html'
+                      },
+                      ExpiresIn=300
+                  )
+                  
+                  return {
+                      'statusCode': 302,
+                      'headers': {
+                          'Location': url
+                      }
+                  }
+              
+              elif path == '/signout':
+                  # Handle sign out
+                  return {
+                      'statusCode': 302,
+                      'headers': {
+                          'Location': f"https://{os.environ['COGNITO_DOMAIN']}/logout"
+                      }
+                  }
+              
+              # Default: redirect to Cognito login
+              return {
+                  'statusCode': 302,
+                  'headers': {
+                      'Location': f"https://{os.environ['COGNITO_DOMAIN']}/login?response_type=code&client_id={os.environ['CLIENT_ID']}&redirect_uri={urllib.parse.quote(os.environ['CALLBACK_URL'])}"
+                  }
+              }
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref WebsiteBucket
+          COGNITO_DOMAIN: !Sub ${AWS::StackName}-${AWS::Region}-${AWS::AccountId}-auth.auth.${AWS::Region}.amazoncognito.com
+          CLIENT_ID: !Ref UserPoolClient
+          CALLBACK_URL: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/callback
+
+  # API Gateway
+  Api:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub ${AWS::StackName}-api
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # Add root method (for base URL)
+  RootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: ANY
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthHandlerFunction.Arn}/invocations
+      ResourceId: !GetAtt Api.RootResourceId
+      RestApiId: !Ref Api
+
+  # Proxy resource for all other paths
+  ProxyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: '{proxy+}'
+      RestApiId: !Ref Api
+
+  ProxyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: ANY
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthHandlerFunction.Arn}/invocations
+      ResourceId: !Ref ProxyResource
+      RestApiId: !Ref Api
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: 
+      - RootMethod
+      - ProxyMethod
+    Properties:
+      RestApiId: !Ref Api
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiDeployment
+      RestApiId: !Ref Api
+      StageName: prod
+
+  # Lambda permission
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt AuthHandlerFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*
+
+  # Content uploader
+  ContentUploaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3UploadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub ${WebsiteBucket.Arn}/*
 
   WebAppFile:
     Type: 'Custom::S3Object'
     DependsOn: GetGithubRepoApiDeployment
     Properties:
-      ServiceToken: !GetAtt CreateS3ObjectLambda.Arn
-      BucketName: !Ref WebAppBucket
+      ServiceToken: !GetAtt ContentUploader.Arn
+      BucketName: !Ref WebsiteBucket
       Key: index.html
       Body: !Sub |
         <!DOCTYPE html>
@@ -722,10 +999,52 @@ Resources:
             </script>
             </body>
             </html>
-          
 
-  LambdaExecutionRole:
-    Type: 'AWS::IAM::Role'
+  ContentUploader:
+    Type: AWS::Lambda::Function
+    DependsOn: GetGithubRepoApiDeployment
+    Properties:
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt ContentUploaderRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          
+          def handler(event, context):
+              try:
+                  if event['RequestType'] in ['Create', 'Update']:
+                      s3 = boto3.client('s3')
+                      bucket = event['ResourceProperties']['BucketName']
+                      body = event['ResourceProperties']['Body']
+                      
+                      # Upload protected content
+                      s3.put_object(
+                          Bucket=bucket,
+                          Key='protected.html',
+                          Body=body,
+                          ContentType='text/html'
+                      )
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                          'Message': 'Content uploaded successfully'
+                      })
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  
+              except Exception as e:
+                  print(e)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {
+                      'Error': str(e)
+                  })
+
+  
+
+  # Cognito user creator
+  CognitoUserCreatorRole:
+    Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -737,78 +1056,80 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: LambdaExecutionPolicy
+        - PolicyName: CognitoAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: 'arn:aws:logs:*:*:*'
-              - Effect: Allow
-                Action:
-                  - 's3:PutObject'
-                  - 's3:GetObject'
-                  - 's3:ListBucket'
-                Resource: 
-                  - !Sub 'arn:aws:s3:::${WebAppBucket}'
-                  - !Sub 'arn:aws:s3:::${WebAppBucket}/*'
-                  - 'arn:aws:s3:::ade-env-webapp-bucket'
-                  - 'arn:aws:s3:::ade-env-webapp-bucket/*'
-              - Effect: Allow
-                Action:
-                  - cloudformation:CreateStack
-                  - cloudformation:DescribeStacks
-                  - cloudformation:DescribeStackEvents
-                  - cloudformation:TagResource
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - iam:CreateRole
-                  - iam:PutRolePolicy
-                  - iam:AttachRolePolicy
-                  - iam:DetachRolePolicy
-                  - iam:DeleteRole
-                  - iam:DeleteRolePolicy
-                  - iam:GetRole
-                  - iam:TagRole
-                  - iam:CreateUser
-                  - iam:DeleteUser
-                  - iam:GetUser
-                  - iam:ListUsers
-                  - iam:UpdateUser
-                  - iam:TagUser
-                  - iam:UntagUser
-                  - iam:CreateLoginProfile
-                  - iam:DeleteLoginProfile
-                  - iam:GetLoginProfile
-                  - iam:UpdateLoginProfile
-                  - iam:CreateAccessKey
-                  - iam:DeleteAccessKey
-                  - iam:ListAccessKeys
-                  - iam:AttachUserPolicy
-                  - iam:DetachUserPolicy
-                  - iam:ListAttachedUserPolicies
-                  - iam:PutUserPolicy
-                  - iam:DeleteUserPolicy
-                  - iam:ListUserPolicies
-                  - iam:PassRole          
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - tag:GetResources
-                  - tag:TagResources
-                  - tag:UntagResources
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - 's3:*'
-                  - 'ApiGateway:*'
-                  - 'bedrock:*'
-                  - 'lambda:*'
-                Resource: '*'
+                  - cognito-idp:AdminCreateUser
+                  - cognito-idp:AdminSetUserPassword
+                Resource: !GetAtt UserPool.Arn
+
+  CognitoUserCreator:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt CognitoUserCreatorRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import time
+          
+          def handler(event, context):
+              try:
+                  if event['RequestType'] in ['Create', 'Update']:
+                      user_pool_id = event['ResourceProperties']['UserPoolId']
+                      email = event['ResourceProperties']['AdminEmail']
+                      password = event['ResourceProperties']['InitialPassword']
+                      
+                      cognito = boto3.client('cognito-idp')
+                      
+                      try:
+                          cognito.admin_create_user(
+                              UserPoolId=user_pool_id,
+                              Username=email,
+                              UserAttributes=[
+                                  {'Name': 'email', 'Value': email},
+                                  {'Name': 'email_verified', 'Value': 'true'}
+                              ],
+                              MessageAction='SUPPRESS'
+                          )
+                      except cognito.exceptions.UsernameExistsException:
+                          print(f"User {email} already exists")
+                      
+                      time.sleep(2)
+                      
+                      cognito.admin_set_user_password(
+                          UserPoolId=user_pool_id,
+                          Username=email,
+                          Password=password,
+                          Permanent=True
+                      )
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                          'Message': f'User {email} configured successfully'
+                      })
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  
+              except Exception as e:
+                  print(e)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {
+                      'Error': str(e)
+                  })
+
+  CreateCognitoUser:
+    Type: Custom::CognitoUser
+    DependsOn: UserPool
+    Properties:
+      ServiceToken: !GetAtt CognitoUserCreator.Arn
+      UserPoolId: !Ref UserPool
+      AdminEmail: !Ref AdminEmail
+      InitialPassword: !Ref InitialPassword
 
   InitiateStackFunction:
     Type: AWS::Lambda::Function
@@ -1136,7 +1457,7 @@ Resources:
                   download_url = "https://github.com/bfateen/genaiprototyping/archive/refs/heads/main.zip"
                   print(f"Downloading from: {download_url}")
                   
-                  bucket_name = "${WebAppBucket}"
+                  bucket_name = "${WebsiteBucket}"
                   folder_name = "protoscripts"
                   assets_folder_name = "assets"
                   
@@ -1301,58 +1622,25 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GetGithubRepoApi}/*'
 
-  CreateS3ObjectLambda:
-    Type: 'AWS::Lambda::Function'
-    Properties:
-      FunctionName: CreateS3ObjectLambda
-      Handler: index.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Runtime: python3.8
-      Code:
-        ZipFile: |
-          import boto3
-          import cfnresponse
-          import json
-          import logging
-
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
-
-          def handler(event, context):
-              logger.info(f"Received event: {json.dumps(event)}")
-              
-              try:
-                  if event['RequestType'] in ['Create', 'Update']:
-                      s3 = boto3.client('s3')
-                      bucket = event['ResourceProperties']['BucketName']
-                      key = event['ResourceProperties']['Key']
-                      body = event['ResourceProperties']['Body']
-
-                      logger.info(f"Attempting to put object in bucket: {bucket}, key: {key}")
-                      s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType='text/html')
-                      logger.info("Successfully put object in S3")
-                      
-                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
-                  else:
-                      logger.info(f"Request Type is {event['RequestType']}, no action needed")
-                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
-              except Exception as e:
-                  logger.error(f"Error: {str(e)}")
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
-
 Outputs:
-  WebAppURL:
-    Description: 'URL of the deployed web application'
-    Value: !GetAtt WebAppBucket.WebsiteURL
-  InitiateApiURL:
-    Description: 'URL of the API Gateway endpoint for initiating stack creation'
-    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/initiate'
-  CheckStatusApiURL:
-    Description: 'URL of the API Gateway endpoint for checking stack status'
-    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/check-status'
-  GetGithubRepoApiURL:
-    Description: 'URL of the API Gateway endpoint for GetGithubRepo'
-    Value: !Sub 'https://${GetGithubRepoApi}.execute-api.${AWS::Region}.amazonaws.com/default/default'
-  ActualBucketName:
-    Description: 'Name of the created S3 bucket'
-    Value: !Ref WebAppBucket
+  LoginUrl:
+    Description: URL to access the protected content (redirects to Cognito login)
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/
+
+  AdminUsername:
+    Description: Admin username (email)
+    Value: !Ref AdminEmail
+
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+
+  Instructions:
+    Description: Instructions to access the protected content
+    Value: !Sub |
+      1. Open the login URL provided above
+      2. You will be redirected to the Cognito hosted UI
+      3. Login with:
+         Username: ${AdminEmail}
+         Password: ${InitialPassword}
+      4. After successful login, you'll be automatically redirected to the protected content
