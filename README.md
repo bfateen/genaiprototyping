@@ -2,7 +2,7 @@
 
 The environment is setup with the following these steps: 1/ User watches a short video that describes the simple setup process and basic info on CloudFormation and Amazon Bedrock model access, 2/ User requests and is granted access to an AI Model, 3/ User uploads the setup CloudFormation script which installs the web app and sets up all the necessary roles and permissions, 4/ User clicks on the URL for the web app to open it in their browser and chooses from pre-loaded prototypes, 5/ The CloudFormation stack is deployed on the backend and returns the new resources, 6/ Links to the assets are shown clearly to the user (frontend URL, API endpoint, link to Lambda function, etc.), 7/ A brief description about the generated resources and how they interact along with clickable links to 30 second videos that explain concepts (i.e. Prompt Engineering) and services (i.e. API Gateway) which creates a personalized learning path on the right side column. (See Appendix A for UI sample)
 
-![image](https://github.com/user-attachments/assets/ed224afb-7407-4079-9df6-457a2969d31e)
+<img width="529" alt="image" src="https://github.com/user-attachments/assets/d8ea6d88-42d4-41e4-b664-3325661cc540">
 
 ### Main Features:
 1.	Dynamic loading of custom-built prototypes from a GitHub repository
