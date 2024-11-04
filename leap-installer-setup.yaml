@@ -1,14 +1,14 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Unified CloudFormation Deployment with S3 WebApp, Lambda, API Gateway, enhanced CORS and error handling'
+Description: 'This CloudFormation template installs the full LEAP environment with a frontend S3 WebApp, Lambda functions, API Gateway, enhanced CORS, error handling and IAM permissions'
 
 Parameters:
   BucketName:
     Type: String
     Description: Name of the S3 bucket to create for hosting the web app
-    Default: 'cloudformation-deploy-webapp-bucket'
+    Default: 'leap-deploy-webapp-bucket'
 
 Conditions:
-  UseProvidedBucketName: !Not [!Equals [!Ref BucketName, 'cloudformation-deploy-webapp-bucket']]
+  UseProvidedBucketName: !Not [!Equals [!Ref BucketName, 'leap-deploy-webapp-bucket']]
 
 Resources:
   WebAppBucket:
