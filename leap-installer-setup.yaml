@@ -1,0 +1,1358 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Unified CloudFormation Deployment with S3 WebApp, Lambda, API Gateway, enhanced CORS and error handling'
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket to create for hosting the web app
+    Default: 'cloudformation-deploy-webapp-bucket'
+
+Conditions:
+  UseProvidedBucketName: !Not [!Equals [!Ref BucketName, 'cloudformation-deploy-webapp-bucket']]
+
+Resources:
+  WebAppBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !If 
+        - UseProvidedBucketName
+        - !Ref BucketName
+        - !Sub '${AWS::StackName}-${AWS::AccountId}-${AWS::Region}'
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  WebAppBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref WebAppBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${WebAppBucket}/*'
+
+  WebAppFile:
+    Type: 'Custom::S3Object'
+    DependsOn: GetGithubRepoApiDeployment
+    Properties:
+      ServiceToken: !GetAtt CreateS3ObjectLambda.Arn
+      BucketName: !Ref WebAppBucket
+      Key: index.html
+      Body: !Sub |
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Cloud Prototype Launcher</title>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+            <style>
+                :root {
+                    --primary-bg: #f0f2f5;
+                    --card-bg: #ffffff;
+                    --primary-text: #1a1a1a;
+                    --secondary-text: #666666;
+                    --accent-color: #0066cc;
+                    --border-radius: 12px;
+                    --spacing: 20px;
+                }
+
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    background-color: var(--primary-bg);
+                    color: var(--primary-text);
+                    line-height: 1.6;
+                    padding: var(--spacing);
+                }
+
+                .container {
+                    max-width: 1400px;
+                    margin: 0 auto;
+                    display: flex;
+                    gap: var(--spacing);
+                }
+
+                .main-column {
+                    flex: 7;
+                }
+
+                .side-column {
+                    flex: 3;
+                }
+
+                .card {
+                    background: var(--card-bg);
+                    border-radius: var(--border-radius);
+                    padding: var(--spacing);
+                    margin-bottom: var(--spacing);
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    transition: transform 0.2s, box-shadow 0.2s;
+                }
+
+                .prototype-card {
+                    cursor: pointer;
+                }
+
+                .prototype-card:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+                }
+
+                .card-header {
+                    display: flex;
+                    align-items: center;
+                    margin-bottom: 15px;
+                }
+
+                .card-icon {
+                    width: 48px;
+                    height: 48px;
+                    margin-right: 15px;
+                    border-radius: 8px;
+                }
+
+                .card-title {
+                    font-size: 1.2rem;
+                    font-weight: 600;
+                    margin-bottom: 4px;
+                }
+
+                .card-services {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 8px;
+                    margin-top: 10px;
+                }
+
+                .service-tag {
+                    background: #e1e8ff;
+                    color: #0044aa;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 0.85rem;
+                }
+
+                .progress-bar {
+                    display: none;
+                    height: 6px;
+                    background: #e1e8ff;
+                    border-radius: 3px;
+                    overflow: hidden;
+                    margin: 20px 0;
+                }
+
+                .progress-fill {
+                    height: 100%;
+                    background: var(--accent-color);
+                    width: 0%;
+                    transition: width 0.3s ease;
+                }
+
+                .video-container {
+                    position: relative;
+                    padding-bottom: 56.25%;
+                    height: 0;
+                    overflow: hidden;
+                }
+
+                .video-container img {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                }
+
+                .cost-card {
+                    background: linear-gradient(135deg, #0066cc, #0044aa);
+                    color: white;
+                }
+
+                .total-cost {
+                    font-size: 2rem;
+                    font-weight: 600;
+                    margin: 10px 0;
+                }
+
+                .architecture-diagram {
+                    display: none;
+                    padding: 20px;
+                    margin-top: 20px;
+                }
+
+                .services-flow {
+                    display: flex;
+                    flex-wrap: wrap;
+                    justify-content: center;
+                    gap: 20px;
+                    position: relative;
+                    padding: 20px 0;
+                }
+
+                .service-node {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    position: relative;
+                    width: 120px;
+                    cursor: pointer;
+                }
+
+                .service-icon {
+                    width: 64px;
+                    height: 64px;
+                    background: #f5f5f5;
+                    border-radius: 8px;
+                    padding: 8px;
+                    margin-bottom: 8px;
+                    border: 2px solid #e1e8ff;
+                }
+
+                .service-name {
+                    text-align: center;
+                    font-weight: 500;
+                    font-size: 0.9rem;
+                }
+
+                .service-arrow {
+                    position: absolute;
+                    top: 32px;
+                    right: -24px;
+                    width: 28px;
+                    height: 2px;
+                    background-color: #0066cc;
+                }
+
+                .service-arrow::after {
+                    content: '';
+                    position: absolute;
+                    right: 0;
+                    top: -4px;
+                    border: 5px solid transparent;
+                    border-left-color: #0066cc;
+                }
+
+                .deployment-info {
+                    display: none;
+                }
+
+                .deployment-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 15px;
+                    padding: 10px 0;
+                    border-bottom: 1px solid #eee;
+                }
+
+                .deployment-status {
+                    color: #00aa44;
+                    font-weight: 500;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                }
+
+                .status-dot {
+                    width: 8px;
+                    height: 8px;
+                    background-color: #00aa44;
+                    border-radius: 50%;
+                }
+
+                .prototype-card.expanded {
+                    min-height: 300px;
+                }
+
+                .service-desc{
+                    display:none;
+                }
+
+                .service-node:hover .service-desc{
+                    display:block;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="main-column">
+                    <h1 style="margin-bottom: var(--spacing)">Cloud Prototypes</h1>
+                    <div id="output"></div>
+                    <div id="prototype-list"></div>
+                </div>
+                
+                <div class="side-column">
+                    <div class="card">
+                        <h2>Welcome Guide</h2>
+                        <div class="video-container">
+                            <img src="/api/placeholder/400/225" alt="Welcome video placeholder">
+                        </div>
+                    </div>
+                    
+                    <div class="card cost-card">
+                        <h2>Total Costs</h2>
+                        <div class="total-cost">$127.84</div>
+                        <p>Current billing period</p>
+                    </div>
+                </div>
+            </div>
+
+            
+        <script>
+                var appinfo = [];
+                var fulldata=null;
+
+                var prototypes = [
+                    {
+                        id: 1,
+                        title: "Serverless API Backend",
+                        description: "",
+                        icon: "/api/placeholder/48/48",
+                        videoUrl: "https://example.com/video1",
+                        services: [],
+                        estimatedCost: "$12/month"
+                    },
+                    {
+                        id: 2,
+                        title: "ML Model Training Pipeline",
+                        description: "End-to-end pipeline for training and deploying machine learning models",
+                        icon: "/api/placeholder/48/48",
+                        videoUrl: "https://example.com/video2",
+                        services: [],
+                        estimatedCost: "$45/month"
+                    },
+                    {
+                        id: 3,
+                        title: "Real-time Analytics Dashboard",
+                        description: "Interactive dashboard for processing and visualizing streaming data",
+                        icon: "/api/placeholder/48/48",
+                        videoUrl: "https://example.com/video3",
+                        services: [],
+                        estimatedCost: "$28/month"
+                    }
+                ];
+
+                function renderPrototypes() {
+                    const container = $('#prototype-list');
+                    var pindex = 0;
+                    prototypes.forEach(prototype => {
+                        const servicesHtml = prototype.services.map((service, index) => 
+                            '<div class="service-node" data-index="' + pindex + '" data-service="' + 
+                            service.name.toLowerCase().replace(/ /g, '') + '">' +
+                            '<img src="assets/' + service.name.toLowerCase().replace(/ /g, '') + 
+                            '.png" alt="' + service.name + '" class="service-icon">' +
+                            '<div class="service-name">' + service.name + 
+                            '<p class="service-desc">' + service.desc + '</p></div>' +
+                            (index < prototype.services.length - 1 ? '<div class="service-arrow"></div>' : '') +
+                            '</div>'
+                        ).join('');
+
+                        pindex++;
+
+                        var desc = LinkExplainers(prototype.description);
+                        var fulldesc = LinkExplainers(prototype.fulldescription);
+
+                        const card = $(
+                            '<div class="card prototype-card" data-id="' + prototype.id + '">' +
+                            '<div class="card-content">' +
+                            '<div class="card-header">' +
+                            '<img src="' + prototype.icon + '" alt="' + prototype.title + ' icon" class="card-icon">' +
+                            '<div>' +
+                            '<div class="card-title">' + prototype.title + '</div>' +
+                            '<div class="estimated-cost">' + prototype.estimatedCost + '</div>' +
+                            '</div>' +
+                            '</div>' +
+                            '<p>' + desc + '</p>' +
+                            '<div class="card-services">' +
+                            prototype.services.map(service => 
+                                '<span class="service-tag">' + service.name + '</span>'
+                            ).join('') +
+                            '</div>' +
+                            '</div>' +
+                            '<div class="progress-bar">' +
+                            '<div class="progress-fill"></div>' +
+                            '</div>' +
+                            '<div class="deployment-info">' +
+                            '<div class="deployment-header">' +
+                            '<h3>Deployment Architecture</h3>' +
+                            '<div class="deployment-status">' +
+                            '<div class="status-dot"></div>' +
+                            'Active' +
+                            '</div>' +
+                            '</div>' +
+                            '<div class="deployment-links"></div>' +
+                            '<div class="architecture-diagram">' +
+                            '<div class="services-flow">' +
+                            servicesHtml +
+                            '</div>' +
+                            '</div>' +
+                            '<div class="prototype-description">' +
+                            '<p>' + fulldesc + '</p>' +
+                            '</div>' +
+                            '</div>' +
+                            '</div>'
+                        );
+                        container.append(card);
+                    });
+                }
+
+                async function fetchGithubRepoData() {
+                    try {
+                    const response = await fetch('https://${GetGithubRepoApi}.execute-api.${AWS::Region}.amazonaws.com/default/default', {
+                            method: 'GET',
+                            headers: {
+                                'Accept': 'application/json',
+                                'Origin': window.location.origin
+                            },
+                            mode: 'cors'
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('HTTP error! status: ' + response.status);
+                        }
+
+                        const data = await response.json();
+                        console.log('Raw API Response:', data);
+
+                        prototypes = data['prototypes'];
+                        appinfo = data["appinfo"];
+                        fulldata = data;
+
+                        renderPrototypes();
+                        saveToLocalStorage('myAppState', data);
+                        return data.body;
+
+                    } catch (error) {
+                        console.error('Error fetching repository data:', error);
+                        alert('Error fetching repository data: ' + error.message);
+                    }
+                }
+
+                async function deployPrototypeTemplate(id) {
+                    const output = document.getElementById('output');
+                const apiUrl = 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/initiate';
+
+                    const tkey = 'protoscripts/' + id + '/template.yaml';
+
+                    try {
+                        const initiateResponse = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ templateKey: tkey, templateBucket: appinfo['bucket'] }),
+                        });
+                        const initiateData = await initiateResponse.json();
+                        if (initiateResponse.ok) {
+                            output.innerHTML = 'Stack creation initiated. Stack ID: ' + initiateData.stackId;
+                            checkStatus(initiateData.stackName, id);
+                        } else {
+                            throw new Error(initiateData.error || 'Unknown error occurred');
+                        }
+                    } catch (error) {
+                        output.innerHTML = 'Error: ' + error.message;
+                    }
+                }
+
+                async function checkStatus(stackName, pid) {
+                    const output = document.getElementById('output');
+                const apiUrl = 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/check-status';
+
+                    try {
+                        while (true) {
+                            const statusResponse = await fetch(apiUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ stackName: stackName }),
+                            });
+                            const statusData = await statusResponse.json();
+                            if (statusResponse.ok) {
+                                output.innerHTML += '<br>Status: ' + statusData.status;
+                                if (statusData.status.endsWith('_COMPLETE') || statusData.status.endsWith('_FAILED')) {
+                                    if (statusData.error) {
+                                        output.innerHTML += '<br>Error: ' + statusData.error;
+                                    }
+                                    
+                                    if (statusData.outputs) {
+                                        var prot = {};
+                                        var pindex = 0;
+
+                                        for (var i = 0; i < prototypes.length; i++)
+                                            if (prototypes[i]['id'] == pid) {
+                                                prot = prototypes[i];
+                                                pindex = i;
+                                                prototypes[i]['outputs'] = statusData.outputs;
+                                                break;
+                                            }
+
+                                        var outputs = statusData.outputs;
+                                        for (var key in outputs) {
+                                            if (outputs.hasOwnProperty(key)) {
+                                                console.log('Output: ' + key + ' = ' + outputs[key]);
+
+                                                if (key == "FrontendURL")
+                                                    prototypes[i]['frontend'] = outputs[key];
+                                                else if (key == "BackendURL")
+                                                    prototypes[i]['backend'] = outputs[key];
+                                            }
+                                        }
+                                    }
+
+                                    PrototypeDeployed(pid, pindex);
+                                    saveToLocalStorage('myAppState', fulldata);
+
+                                    break;
+                                }
+                            } else {
+                                throw new Error(statusData.error || 'Unknown error occurred');
+                            }
+                            await new Promise(resolve => setTimeout(resolve, 5000));
+                        }
+                    } catch (error) {
+                        output.innerHTML += '<br>Error checking status: ' + error.message;
+                    }
+                }
+
+                function PrototypeDeployed(id, index) {
+                    const card = $(`.prototype-card[data-id="` + id + `"]`);
+                    const progressBar = card.find('.progress-bar');
+                    const architectureDiagram = card.find('.architecture-diagram');
+                    const dlinks = card.find('.deployment-links');
+                    const deploymentInfo = card.find('.deployment-info');
+
+                    prototypes[index]['active']=true;
+                    fulldata['prototypes'] = prototypes;
+
+                    $(dlinks).html('<p>Frontend: <a href="' + prototypes[index]['frontend'] + '">' + prototypes[index]['frontend'] + '</a><br>Backend: <a href="' + prototypes[index]['backend'] + '">' + prototypes[index]['backend'] + '</a></p>');
+
+                    progressBar.fadeOut(() => {
+                        deploymentInfo.fadeIn();
+                        architectureDiagram.fadeIn();
+                    });
+                }
+
+                 function GetServiceID(pid,service)
+                {
+                        var outputs = prototypes[pid]['outputs'];
+
+                        alert(pid+' '+JSON.stringify(outputs));
+                    
+                        for (var key in outputs) {
+                            if (outputs.hasOwnProperty(key)) {
+                                console.log('GetServiceID Output: ' + key + ' = ' + outputs[key]);
+
+                                if ((service=="s3") && (key == "S3BucketName")) {
+                                    return outputs[key];
+                                }
+                                else  if ((service == "lambda") && (key == "LambdaFunctionName")) {
+                                    return outputs[key];
+                                }
+                                else if ((service == "apigateway") && (key == "ApiEndpoint")) {
+                                    return outputs[key];
+                                }
+                            }
+                        }
+
+                        return "";
+                }
+
+                
+                function LinkExplainers(words)
+                {
+                    var explainers = appinfo["explainers"];
+                    console.log(appinfo);
+                    explainers.forEach(function (explainer,index) {
+                        var term = explainer.term;
+                        var escapedTerm = term.replace(/[.*+?^{}$()|[\]\\]/g, '\\$&'); // Escape special characters
+                        var regex = new RegExp('\\b' + escapedTerm + '\\b', 'gi');
+
+                        words = words.replace(regex, function (match) {
+                            return '<a href="#" class="explainer-link" data-index="' + index + '" data-explainer-id="' + explainer.name + '">' + match + '</a>';
+                        });
+                    });
+
+                    return words;
+
+                }
+
+                function ShowExplainer(index)
+                {
+                    var explainers = appinfo.explainers;
+                    var item = explainers[index];
+
+                     $('.side-column').prepend('<div class=\"card\"><h2>Explainer '+item['name']+'</h2><div class=/"video-container/"><iframe width="320" height="215" src="'+item['videoURL']+'"></iframe></div> <p>'+item['description']+'</p></div>');
+
+                }
+
+                function deployPrototype(id) {
+            const card = $(".prototype-card[data-id='"+id+"']");
+            const cardContent = card.find('.card-content');
+            const progressBar = card.find('.progress-bar');
+            const progressFill = card.find('.progress-fill');
+            const deploymentInfo = card.find('.deployment-info');
+            const architectureDiagram = card.find('.architecture-diagram');
+            
+            // Add expanded class for smooth transition
+            card.addClass('expanded');
+
+            deployPrototypeTemplate(id);
+            
+            // Hide card content, show progress bar
+            cardContent.fadeOut();
+            progressBar.fadeIn();
+            
+            // Simulate deployment progress
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 25;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    setTimeout(() => {
+                       
+                    }, 1000);
+                }
+                progressFill.css('width', progress+"%");
+            }, 500);
+        }
+
+        const saveToLocalStorage = (key, dictionary) => {
+                try {
+                    const serializedData = JSON.stringify(dictionary);
+                    localStorage.setItem(key, serializedData);
+                    return true;
+                } catch (error) {
+                    console.error('Error saving to localStorage:', error);
+                    return false;
+                }
+            };
+
+            // Function to load a dictionary from localStorage
+            const loadFromLocalStorage = (key, defaultValue = null) => {
+                try {
+                    const serializedData = localStorage.getItem(key);
+                    if (serializedData === null) {
+                        return defaultValue;
+                    }
+                    return JSON.parse(serializedData);
+                } catch (error) {
+                    console.error('Error loading from localStorage:', error);
+                    return defaultValue;
+                }
+            };
+
+                // Initialize when document is ready
+                $(document).ready(() => {
+                    
+                    var loadedDict = loadFromLocalStorage('myAppState');
+
+            if (loadedDict)
+            {
+                fulldata = loadedDict;
+
+                prototypes = loadedDict['prototypes'];
+                appinfo = loadedDict["appinfo"];
+
+                renderPrototypes();
+
+                var pindex=0;
+
+                prototypes.forEach(prototype => {
+                    if (prototype.active)
+                    {
+                        const card = $(".prototype-card[data-id='" + prototype.id + "']");
+                        const cardContent = card.find('.card-content');
+                        card.addClass('expanded');
+                        cardContent.fadeOut();
+                          PrototypeDeployed(prototype.id, pindex);
+                    }
+                    pindex++;
+                });
+
+
+
+                //alert('loaded cache');
+            }
+            else
+            fetchGithubRepoData();
+                    
+                    $(document).on('click', '.prototype-card', function() {
+                        if (!$(this).find('.deployment-info').is(':visible')) {
+                            const id = $(this).data('id');
+                            deployPrototype(id);
+                        }
+                    });
+
+                    $(document).on('click', '.service-node', function() {
+                        var pindex = $(this).data('index');
+                        var service = $(this).data('service');
+                        var outputs = prototypes[pindex].outputs;
+                        var url = '';
+
+                        if (service === 's3' && outputs.S3BucketName) {
+                    url = "https://s3.console.aws.amazon.com/s3/buckets/" + outputs.S3BucketName;
+                } else if (service === 'lambda' && outputs.LambdaFunctionName) {
+                    url = "https://console.aws.amazon.com/lambda/home?region=${AWS::Region}#/functions/" + outputs.LambdaFunctionName;
+                } else if (service === 'apigateway' && outputs.ApiEndpoint) {
+                    url = "https://console.aws.amazon.com/apigateway/home?region=${AWS::Region}#/apis/" + outputs.ApiEndpoint;
+                }
+
+                        if (url) {
+                            window.open(url, '_blank').focus();
+                        }
+                    });
+
+                    $(document).on('click', '.explainer-link', function() {
+                        ShowExplainer($(this).data('index'));
+                    });
+                });
+            </script>
+            </body>
+            </html>
+          
+
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: 'arn:aws:logs:*:*:*'
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                Resource: 
+                  - !Sub 'arn:aws:s3:::${WebAppBucket}'
+                  - !Sub 'arn:aws:s3:::${WebAppBucket}/*'
+                  - 'arn:aws:s3:::ade-env-webapp-bucket'
+                  - 'arn:aws:s3:::ade-env-webapp-bucket/*'
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:TagResource
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:DeleteRole
+                  - iam:DeleteRolePolicy
+                  - iam:GetRole
+                  - iam:TagRole
+                  - iam:CreateUser
+                  - iam:DeleteUser
+                  - iam:GetUser
+                  - iam:ListUsers
+                  - iam:UpdateUser
+                  - iam:TagUser
+                  - iam:UntagUser
+                  - iam:CreateLoginProfile
+                  - iam:DeleteLoginProfile
+                  - iam:GetLoginProfile
+                  - iam:UpdateLoginProfile
+                  - iam:CreateAccessKey
+                  - iam:DeleteAccessKey
+                  - iam:ListAccessKeys
+                  - iam:AttachUserPolicy
+                  - iam:DetachUserPolicy
+                  - iam:ListAttachedUserPolicies
+                  - iam:PutUserPolicy
+                  - iam:DeleteUserPolicy
+                  - iam:ListUserPolicies
+                  - iam:PassRole          
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - tag:GetResources
+                  - tag:TagResources
+                  - tag:UntagResources
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 's3:*'
+                  - 'ApiGateway:*'
+                  - 'bedrock:*'
+                  - 'lambda:*'
+                Resource: '*'
+
+  InitiateStackFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: InitiateStackFunction
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import uuid
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              logger.info(f"Received event: {json.dumps(event)}")
+              
+              cloudformation = boto3.client('cloudformation')
+              
+              headers = {
+                  'Access-Control-Allow-Origin': '*',
+                  'Access-Control-Allow-Headers': 'Content-Type',
+                  'Access-Control-Allow-Methods': 'OPTIONS,POST'
+              }
+
+              try:
+                  body = json.loads(event['body'])
+                  template_body = body.get('templateBody')
+                  template_key = body.get('templateKey')
+                  template_bucket = body.get('templateBucket')
+
+                  if template_body:
+                      stack_params = {
+                          'TemplateBody': template_body
+                      }
+                  elif template_key and template_bucket:
+                      stack_params = {
+                          'TemplateURL': f'https://{template_bucket}.s3.amazonaws.com/{template_key}'
+                      }
+                  else:
+                      raise ValueError("Either templateBody or templateKey+templateBucket must be provided")
+
+                  stack_name = f"WebAppStack{uuid.uuid4().hex[:8]}"
+                  logger.info(f"Creating stack: {stack_name}")
+                  
+                  stack_params.update({
+                      'StackName': stack_name,
+                      'Capabilities': ['CAPABILITY_NAMED_IAM']
+                  })
+                  
+                  response = cloudformation.create_stack(**stack_params)
+
+                  logger.info(f"Stack creation initiated: {response['StackId']}")
+
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'message': 'Stack creation initiated',
+                          'stackId': response['StackId'],
+                          'stackName': stack_name
+                      })
+                  }
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({'error': str(e)})
+                  }
+      Runtime: python3.8
+      Timeout: 30
+
+  CheckStackStatusFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: CheckStackStatusFunction
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              logger.info(f"Received event: {json.dumps(event)}")
+              
+              cloudformation = boto3.client('cloudformation')
+
+              headers = {
+                  'Access-Control-Allow-Origin': '*',
+                  'Access-Control-Allow-Headers': 'Content-Type',
+                  'Access-Control-Allow-Methods': 'OPTIONS,POST'
+              }
+
+              try:
+                  body = json.loads(event['body'])
+                  stack_name = body['stackName']
+
+                  logger.info(f"Checking status for stack: {stack_name}")
+
+                  stack = cloudformation.describe_stacks(StackName=stack_name)['Stacks'][0]
+                  status = stack['StackStatus']
+                  outputs = {output['OutputKey']: output['OutputValue'] for output in stack.get('Outputs', [])}
+
+                  logger.info(f"Stack status: {status}")
+
+                  response_body = {
+                      'status': status,
+                      'stackName': stack_name,
+                      'outputs': outputs
+                  }
+
+                  if status.endswith('_FAILED'):
+                      events = cloudformation.describe_stack_events(StackName=stack_name)['StackEvents']
+                      for event in reversed(events):
+                          if 'ResourceStatusReason' in event and event['ResourceStatus'].endswith('_FAILED'):
+                              response_body['error'] = event['ResourceStatusReason']
+                              logger.error(f"Stack creation failed: {response_body['error']}")
+                              break
+
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps(response_body)
+                  }
+
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({'error': str(e)})
+                  }
+      Runtime: python3.8
+      Timeout: 30
+
+  ApiGatewayRestApi:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: DeployStackAPI
+
+  InitiateStackResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'initiate'
+
+  InitiateStackMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref InitiateStackResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${InitiateStackFunction.Arn}/invocations'
+
+  InitiateStackOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref InitiateStackResource
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: 'Empty'
+
+  CheckStatusResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'check-status'
+
+  CheckStatusMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref CheckStatusResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CheckStackStatusFunction.Arn}/invocations'
+
+  CheckStatusOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref CheckStatusResource
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: 'Empty'
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - InitiateStackMethod
+      - InitiateStackOptionsMethod
+      - CheckStatusMethod
+      - CheckStatusOptionsMethod
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: 'prod'
+
+  LambdaApiGatewayInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt InitiateStackFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*'
+
+  LambdaApiGatewayInvokeCheckStatus:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt CheckStackStatusFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*'
+
+  GetGithubRepoFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: GetGithubRepo
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import json
+          import urllib.request
+          import io
+          import zipfile
+          from datetime import datetime
+          import urllib.parse
+          import boto3
+          import os
+          from pathlib import Path
+
+          def get_content_type(filename):
+              extension = os.path.splitext(filename)[1].lower()
+              content_types = {
+                  '.txt': 'text/plain',
+                  '.html': 'text/html',
+                  '.htm': 'text/html',
+                  '.css': 'text/css',
+                  '.js': 'application/javascript',
+                  '.json': 'application/json',
+                  '.xml': 'application/xml',
+                  '.md': 'text/markdown',
+                  '.png': 'image/png',
+                  '.jpg': 'image/jpeg',
+                  '.jpeg': 'image/jpeg',
+                  '.gif': 'image/gif',
+                  '.pdf': 'application/pdf',
+                  '.zip': 'application/zip'
+              }
+              return content_types.get(extension, 'application/octet-stream')
+              
+          def get_public_url(bucket_name, s3_key, region='us-east-1'):
+              return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
+
+          def lambda_handler(event, context):
+              s3 = boto3.client('s3')
+              
+              headers = {
+                  'Access-Control-Allow-Origin': '*',
+                  'Access-Control-Allow-Methods': 'GET,OPTIONS',
+                  'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                  'Content-Type': 'application/json'
+              }
+
+              try:
+                  download_url = "https://github.com/bfateen/genaiprototyping/archive/refs/heads/main.zip"
+                  print(f"Downloading from: {download_url}")
+                  
+                  bucket_name = "${WebAppBucket}"
+                  folder_name = "protoscripts"
+                  assets_folder_name = "assets"
+                  
+                  with urllib.request.urlopen(download_url) as response:
+                      zip_content = response.read()
+                  
+                  with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_ref:
+                      all_files = zip_ref.namelist()
+                      root_dir = all_files[0].split('/')[0]
+                      processed_files = []
+                      protos = []
+                      
+                      prototypes_prefix = f"{root_dir}/prototypes/"
+                      assets_prefix = f"{root_dir}/assets/"
+                      
+                      maininfo = ""
+                      
+                      for filename in all_files:
+                          if 'appinfo' in filename:
+                              with zip_ref.open(filename) as f:
+                                  maininfo = json.loads(f.read().decode('utf-8'))
+                                  maininfo['bucket']=bucket_name
+                                  
+                      for filename in all_files:
+                          if filename.startswith(assets_prefix):
+                              try:
+                                  relative_path = filename.replace(f"{root_dir}/assets/", "")
+                                  with zip_ref.open(filename) as f:
+                                      content = f.read()
+                                      s3_key = f"{assets_folder_name}/{relative_path}"
+                                      s3.put_object(
+                                          Bucket=bucket_name,
+                                          Key=s3_key,
+                                          Body=content,
+                                          ContentType=get_content_type(relative_path)
+                                      )
+                              except Exception as e:
+                                  print(f"Error processing asset file '{filename}': {str(e)}")
+                          
+                          if filename.startswith(prototypes_prefix) and filename.endswith('/') and not filename.endswith('prototypes/'):
+                              current_prototype = Path(filename).stem
+                              with zip_ref.open(filename+"protoinfo.json") as f:
+                                  obj = json.loads(f.read().decode('utf-8'))
+                                  obj['id'] = current_prototype
+                                  protos.append(obj)
+                          
+                          if filename.startswith(prototypes_prefix) and not filename.endswith('/'):
+                              try:
+                                  file_info = zip_ref.getinfo(filename)
+                                  relative_path = filename.replace(prototypes_prefix, '')
+                                  
+                                  with zip_ref.open(filename) as f:
+                                      content = f.read()
+                                      s3_key = f"{folder_name}/{relative_path}"
+                                      s3.put_object(
+                                          Bucket=bucket_name,
+                                          Key=s3_key,
+                                          Body=content,
+                                          ContentType=get_content_type(relative_path)
+                                      )
+                                      
+                                      public_url = get_public_url(bucket_name, s3_key)
+                                      processed_files.append({
+                                          'name': relative_path,
+                                          'size': file_info.file_size,
+                                          'last_modified': datetime(*file_info.date_time).isoformat(),
+                                          's3_path': f"s3://{bucket_name}/{s3_key}",
+                                          'public_url': public_url
+                                      })
+                              except Exception as e:
+                                  print(f"Error processing prototype file '{filename}': {str(e)}")
+                  
+                  processed_files.sort(key=lambda x: x['name'])
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'appinfo': maininfo,
+                          'prototypes': protos,
+                          'file_count': len(processed_files),
+                          'files': processed_files
+                      })
+                  }
+                  
+              except Exception as e:
+                  print(f"Unexpected error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'error': str(e)
+                      })
+                  }
+      Runtime: python3.8
+      Timeout: 300
+      MemorySize: 256
+
+  GetGithubRepoApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: GetGithubRepoApi
+      Description: API for GetGithubRepo Lambda function
+
+  GetGithubRepoResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref GetGithubRepoApi
+      ParentId: !GetAtt GetGithubRepoApi.RootResourceId
+      PathPart: 'default'
+
+  GetGithubRepoMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref GetGithubRepoApi
+      ResourceId: !Ref GetGithubRepoResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetGithubRepoFunction.Arn}/invocations'
+
+  GetGithubRepoOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref GetGithubRepoApi
+      ResourceId: !Ref GetGithubRepoResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  GetGithubRepoApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetGithubRepoMethod
+      - GetGithubRepoOptionsMethod
+    Properties:
+      RestApiId: !Ref GetGithubRepoApi
+      StageName: default
+
+  GetGithubRepoPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt GetGithubRepoFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GetGithubRepoApi}/*'
+
+  CreateS3ObjectLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: CreateS3ObjectLambda
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.8
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import json
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              logger.info(f"Received event: {json.dumps(event)}")
+              
+              try:
+                  if event['RequestType'] in ['Create', 'Update']:
+                      s3 = boto3.client('s3')
+                      bucket = event['ResourceProperties']['BucketName']
+                      key = event['ResourceProperties']['Key']
+                      body = event['ResourceProperties']['Body']
+
+                      logger.info(f"Attempting to put object in bucket: {bucket}, key: {key}")
+                      s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType='text/html')
+                      logger.info("Successfully put object in S3")
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  else:
+                      logger.info(f"Request Type is {event['RequestType']}, no action needed")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+Outputs:
+  WebAppURL:
+    Description: 'URL of the deployed web application'
+    Value: !GetAtt WebAppBucket.WebsiteURL
+  InitiateApiURL:
+    Description: 'URL of the API Gateway endpoint for initiating stack creation'
+    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/initiate'
+  CheckStatusApiURL:
+    Description: 'URL of the API Gateway endpoint for checking stack status'
+    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/check-status'
+  GetGithubRepoApiURL:
+    Description: 'URL of the API Gateway endpoint for GetGithubRepo'
+    Value: !Sub 'https://${GetGithubRepoApi}.execute-api.${AWS::Region}.amazonaws.com/default/default'
+  ActualBucketName:
+    Description: 'Name of the created S3 bucket'
+    Value: !Ref WebAppBucket
