@@ -2,7 +2,7 @@
     "title": "Chat with your documents with Knowledge Base",
     "description": "Ready-to-deploy REST API with authentication and database integration",
     "fulldescription": "Launch Gen AI prototypes with one click",
-    "icon": "/api/placeholder/48/48",
+    "icon": "icon2.png",
     "videoUrl": "https://example.com/video1",
    "services": [
     {
