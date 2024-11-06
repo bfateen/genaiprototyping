@@ -30,6 +30,7 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 
+
   # Cognito User Pool with Hosted UI
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -195,7 +196,7 @@ Resources:
                           'Bucket': os.environ['BUCKET_NAME'],
                           'Key': 'protected.html'
                       },
-                      ExpiresIn=300
+                      ExpiresIn=3600
                   )
                   
                   return {
@@ -577,14 +578,14 @@ Resources:
                     <div class="card">
                         <h2>Welcome Guide</h2>
                         <div class="video-container">
-                            <img src="/api/placeholder/400/225" alt="Welcome video placeholder">
+                            <iframe width="360" height="215" src="https://www.youtube.com/embed/JBXSwvdJJ6Q?si=_Cq1hFC0nA0Dgqhk" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
                         </div>
                     </div>
                     
-                    <div class="card cost-card">
-                        <h2>Total Costs</h2>
-                        <div class="total-cost">$127.84</div>
-                        <p>Current billing period</p>
+                    <div class="card cost-card" onclick="window.open('https://us-east-1.console.aws.amazon.com/billing/home?region=us-east-1#/freetier');" style="cursor:pointer !important;">
+                        <h2>Explore Costs</h2>
+                        <div class="total-cost" style="display:none">$127.84</div>
+                        <p>Free Tier & Billing</p>
                     </div>
                 </div>
             </div>
@@ -624,6 +625,19 @@ Resources:
                     }
                 ];
 
+                function GetServiceIcon(name)
+                {
+                    for (var i=0;i<fulldata['files'].length;i++)
+                    {
+                        if (fulldata['files'][i]['name']==name)
+                        {
+                            return fulldata['files'][i]['public_url'];
+                        }
+                    }
+
+                    return "";
+                }
+
                 function renderPrototypes() {
                     const container = $('#prototype-list');
                     var pindex = 0;
@@ -631,8 +645,8 @@ Resources:
                         const servicesHtml = prototype.services.map((service, index) => 
                             '<div class="service-node" data-index="' + pindex + '" data-service="' + 
                             service.name.toLowerCase().replace(/ /g, '') + '">' +
-                            '<img src="assets/' + service.name.toLowerCase().replace(/ /g, '') + 
-                            '.png" alt="' + service.name + '" class="service-icon">' +
+                            '<img src="' + GetServiceIcon(service.name.toLowerCase().replace(/ /g, '')) + 
+                            '" alt="' + service.name + '" class="service-icon">' +
                             '<div class="service-name">' + service.name + 
                             '<p class="service-desc">' + service.desc + '</p></div>' +
                             (index < prototype.services.length - 1 ? '<div class="service-arrow"></div>' : '') +
@@ -648,7 +662,7 @@ Resources:
                             '<div class="card prototype-card" data-id="' + prototype.id + '">' +
                             '<div class="card-content">' +
                             '<div class="card-header">' +
-                            '<img src="' + prototype.icon + '" alt="' + prototype.title + ' icon" class="card-icon">' +
+                            '<img src="' + prototype.iconurl + '" alt="' + prototype.title + ' icon" class="card-icon">' +
                             '<div>' +
                             '<div class="card-title">' + prototype.title + '</div>' +
                             '<div class="estimated-cost">' + prototype.estimatedCost + '</div>' +
@@ -1486,6 +1500,7 @@ Resources:
                               try:
                                   relative_path = filename.replace(f"{root_dir}/assets/", "")
                                   with zip_ref.open(filename) as f:
+                                      file_info = zip_ref.getinfo(filename)
                                       content = f.read()
                                       s3_key = f"{assets_folder_name}/{relative_path}"
                                       s3.put_object(
@@ -1494,6 +1509,27 @@ Resources:
                                           Body=content,
                                           ContentType=get_content_type(relative_path)
                                       )
+                                      
+                                      print("s3_key: "+s3_key)
+                                      
+                                      purl = s3.generate_presigned_url(
+                                          'get_object',
+                                          Params={
+                                              'Bucket': bucket_name,
+                                              'Key': s3_key
+                                          },
+                                          ExpiresIn=3600
+                                      )
+                                      
+                                      public_url = get_public_url(bucket_name, s3_key)
+                                      processed_files.append({
+                                          'name': Path(s3_key).stem,
+                                          'size': file_info.file_size,
+                                          'last_modified': datetime(*file_info.date_time).isoformat(),
+                                          's3_path': f"s3://{bucket_name}/{s3_key}",
+                                          'public_url': purl
+                                      })
+                                      
                               except Exception as e:
                                   print(f"Error processing asset file '{filename}': {str(e)}")
                           
@@ -1502,6 +1538,35 @@ Resources:
                               with zip_ref.open(filename+"protoinfo.json") as f:
                                   obj = json.loads(f.read().decode('utf-8'))
                                   obj['id'] = current_prototype
+                                  # Get signed url for icon
+                                  
+                                  iconpath = obj['icon']
+                                  fipath = "genaiprototyping-main/prototypes/" + current_prototype +"/"+ iconpath
+                                  print('iconpath '+fipath)
+                                  
+                                  with zip_ref.open(fipath) as fi:
+                                      icontent = fi.read()
+                                      s3_key = folder_name+"/" + current_prototype +"/"+ iconpath
+                                      relative_path = fipath.replace(prototypes_prefix, '')
+                                      
+                                      s3.put_object(
+                                          Bucket=bucket_name,
+                                          Key=s3_key,
+                                          Body=content,
+                                          ContentType=get_content_type(relative_path)
+                                      )
+                                      
+                                      purl = s3.generate_presigned_url(
+                                          'get_object',
+                                          Params={
+                                              'Bucket': bucket_name,
+                                              'Key': s3_key
+                                          },
+                                          ExpiresIn=3600
+                                      )
+                                      
+                                      obj['iconurl'] = purl
+                                  
                                   protos.append(obj)
                           
                           if filename.startswith(prototypes_prefix) and not filename.endswith('/'):
@@ -1519,14 +1584,7 @@ Resources:
                                           ContentType=get_content_type(relative_path)
                                       )
                                       
-                                      public_url = get_public_url(bucket_name, s3_key)
-                                      processed_files.append({
-                                          'name': relative_path,
-                                          'size': file_info.file_size,
-                                          'last_modified': datetime(*file_info.date_time).isoformat(),
-                                          's3_path': f"s3://{bucket_name}/{s3_key}",
-                                          'public_url': public_url
-                                      })
+                                      
                               except Exception as e:
                                   print(f"Error processing prototype file '{filename}': {str(e)}")
                   
@@ -1552,6 +1610,7 @@ Resources:
                           'error': str(e)
                       })
                   }
+
       Runtime: python3.8
       Timeout: 300
       MemorySize: 256
@@ -1644,3 +1703,4 @@ Outputs:
          Username: ${AdminEmail}
          Password: ${InitialPassword}
       4. After successful login, you'll be automatically redirected to the protected content
+
