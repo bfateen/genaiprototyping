@@ -20,7 +20,7 @@
             "desc": ""
         }
     ],
-    "estimatedCost": "$12/month",
+    "estimatedCost": "Setup time: 1 minute",
     "templates": [
         {
             "name":"template.yaml",
