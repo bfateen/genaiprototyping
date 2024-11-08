@@ -176,7 +176,9 @@ Resources:
 
 A full-stack application that enables intelligent document interactions using Amazon Bedrock's Knowledge Base and Agent capabilities. This prototype demonstrates Retrieval-Augmented Generation (RAG) architecture for building AI-powered document question-answering systems.
 
-#### Key Features
+- **Services**: Cognito, OpenSearch Serverless Collections, Amazon Bedrock, Lambda, API Gateway, S3
+
+#### Features
 - **Vector Search**: Utilizes OpenSearch Serverless for efficient document embedding storage
 - **RAG Implementation**: Combines Knowledge Base retrieval with LLM generation
 - **Real-time Chat**: Interactive web interface for document queries
