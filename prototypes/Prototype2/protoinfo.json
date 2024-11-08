@@ -4,24 +4,22 @@
     "fulldescription": "A full-stack application that enables intelligent document interactions using Amazon Bedrock's Knowledge Base and Agent capabilities. This prototype demonstrates Retrieval-Augmented Generation (RAG) on Amazon Bedrock for building AI-powered document question-answering systems.",
     "icon": "icon2.png",
     "videoUrl": "https://example.com/video1",
-   "services": [
-    {
-        "name": "Lambda",
-        "desc": ""
-    },
-    {
-        "name": "API Gateway",
-        "desc": ""
-    },
-    {
-        "name": "DynamoDB",
-        "desc": ""
-    },
-    {
-        "name": "Cognito",
-        "desc": ""
-    }
-],
+    "services": [
+        {
+            "name":"S3",
+            "desc":""
+        },
+        {
+            "name": "API Gateway",
+            "desc": ""
+        },{
+            "name": "Lambda",
+            "desc": ""
+        },{
+            "name": "Bedrock",
+            "desc": ""
+        }
+    ],
     "estimatedCost": "Setup time: 7 minutes",
     "templates": [
         {
