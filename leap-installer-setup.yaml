@@ -114,6 +114,7 @@ Resources:
                   - cloudformation:DescribeStacks
                   - cloudformation:DescribeStackEvents
                   - cloudformation:TagResource
+                  - cloudformation:CreateChangeSet
                 Resource: '*'
               - Effect: Allow
                 Action:
