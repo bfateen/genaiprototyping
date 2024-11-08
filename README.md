@@ -1,4 +1,6 @@
-### LEAP is a web-based, open-source environment that allows pre-built prototypes to be launched instantly and modified within only 7 steps. It is designed for seamless integration with existing AWS accounts, requiring no modifications to the current AWS user interface. 
+### Launch Environment for AWS Prototypes (LEAP)
+
+LEAP is a web-based, open-source environment that allows pre-built prototypes to be launched instantly and modified within only 7 steps. It is designed for seamless integration with existing AWS accounts, requiring no modifications to the current AWS user interface. 
 
 This solution  enables rapid deployment of full-stack AWS prototypes through a secure web interface. The system consists of two main components:
 1. A secure prototype environment installer
@@ -295,6 +297,12 @@ Parameters:
     Description: Initial password for the admin user
     NoEcho: true
 ```
+
+### Custom Prototype Submission
+To submit a new prototype, please provide the following metadata in addition to the CloudFormation template:
+
+<img width="529" alt="format" src="https://github.com/user-attachments/assets/4e97ee18-45e9-4397-a9b2-849332f620a8">
+
 
 ### Custom Domain Configuration
 To use a custom domain:
