@@ -155,6 +155,116 @@ Resources:
               )
 ```
 
+### 2. Document Chat Application with Amazon Bedrock
+
+A full-stack application that enables intelligent document interactions using Amazon Bedrock's Knowledge Base and Agent capabilities. This prototype demonstrates Retrieval-Augmented Generation (RAG) architecture for building AI-powered document question-answering systems.
+
+#### Key Features
+- **Vector Search**: Utilizes OpenSearch Serverless for efficient document embedding storage
+- **RAG Implementation**: Combines Knowledge Base retrieval with LLM generation
+- **Real-time Chat**: Interactive web interface for document queries
+- **Secure Storage**: Encrypted S3 buckets for document management
+- **Custom Agents**: Bedrock agent with specialized instruction sets
+
+##### Vector Store Setup
+```yaml
+Collection:
+  Type: 'AWS::OpenSearchServerless::Collection'
+  Properties:
+    Name: !Ref AOSSCollectionName
+    Type: VECTORSEARCH
+    StandbyReplicas: DISABLED
+    Description: Collection to hold vector search data
+```
+
+##### Knowledge Base Configuration
+```yaml
+KnowledgeBaseWithAoss:
+  Type: AWS::Bedrock::KnowledgeBase
+  Properties:
+    Name: !Ref KnowledgeBaseName
+    KnowledgeBaseConfiguration:
+      Type: "VECTOR"
+      VectorKnowledgeBaseConfiguration:
+        EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1"
+    StorageConfiguration:
+      Type: "OPENSEARCH_SERVERLESS"
+      OpensearchServerlessConfiguration:
+        CollectionArn: !GetAtt Collection.Arn
+        VectorIndexName: !Ref AOSSIndexName
+```
+
+##### Bedrock Agent Setup
+```yaml
+AgentResource:
+  Type: AWS::Bedrock::Agent
+  Properties:
+    AgentName: !Ref AgentName
+    FoundationModel: "amazon.titan-text-premier-v1:0"
+    Instruction: "You are an HR bot tasked with matching candidates to suitable roles based on their skill sets, experience, and qualifications."
+    KnowledgeBases:
+      - KnowledgeBaseId: !Ref KnowledgeBaseWithAoss
+        KnowledgeBaseState: ENABLED
+```
+
+#### Resource Count
+| Component | Count |
+|-----------|--------|
+| Lambda Functions | 5 |
+| IAM Roles | 4 |
+| S3 Buckets | 2 |
+| Custom Resources | 3 |
+| OpenSearch Collections | 1 |
+| Bedrock Components | 3 |
+
+#### Security Features
+- Encrypted document storage
+- Private S3 buckets with strict access policies
+- IAM role-based access control
+- HTTPS-only API endpoints
+- Secure websocket connections for real-time chat
+
+#### Custom Resource Highlights
+
+##### Vector Index Creation
+```yaml
+OpenSearchVectorIndexLambda:
+  Type: AWS::Lambda::Function
+  Properties:
+    Handler: index.handler
+    Code:
+      ZipFile: |
+        def create_vector_index(endpoint, index_name, awsauth):
+            index_body = {
+                "settings": {
+                    "index.knn": True
+                },
+                "mappings": {
+                    "properties": {
+                        "vector": {
+                            "type": "knn_vector",
+                            "dimension": 1536,
+                            "method": {
+                                "name": "hnsw",
+                                "space_type": "l2",
+                                "engine": "faiss"
+                            }
+                        }
+                    }
+                }
+            }
+```
+
+
+#### Limitations and Considerations
+- Maximum document size: 5MB
+- Supported file formats: PDF, TXT, DOCX
+- Vector dimension: 1536 (Titan Embedding Model)
+- Maximum concurrent users: Based on Lambda concurrency limits
+- API Gateway throttling: 10,000 requests per second
+
+This prototype showcases the integration of various AWS services to create a powerful document interaction system. It's ideal for scenarios requiring intelligent document analysis, Q&A systems, or knowledge base applications.
+
 ## 🔒 Security Considerations
 
 1. **Authentication & Authorization**
