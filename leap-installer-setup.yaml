@@ -913,7 +913,7 @@ Resources:
             // Simulate deployment progress
             let progress = 0;
             const interval = setInterval(() => {
-                progress += Math.random() * 25;
+                progress += Math.random() * 5;
                 if (progress >= 100) {
                     progress = 100;
                     clearInterval(interval);
