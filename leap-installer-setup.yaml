@@ -161,7 +161,7 @@ Resources:
                   - 'bedrock:*'
                   - 'lambda:*'
                   - 'secretsmanager:*'
-                  - 'aoss:*''
+                  - 'aoss:*'
                 Resource: '*'
 
   AuthHandlerFunction:
