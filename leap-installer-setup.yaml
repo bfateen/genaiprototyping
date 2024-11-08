@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'This CloudFormation template installes the full LEAP environment with a secure Cognito endpoint, frontend S3 WebApp, Lambda functions, API Gateway, enhanced CORS, error handling and IAM permissions'
+Description: 'Secure static website using Cognito Hosted UI'
 
 Parameters:
   AdminEmail:
@@ -145,7 +145,8 @@ Resources:
                   - iam:PutUserPolicy
                   - iam:DeleteUserPolicy
                   - iam:ListUserPolicies
-                  - iam:PassRole          
+                  - iam:PassRole     
+                  - iam:GetUserPolicy    
                 Resource: '*'
               - Effect: Allow
                 Action:
@@ -159,6 +160,8 @@ Resources:
                   - 'ApiGateway:*'
                   - 'bedrock:*'
                   - 'lambda:*'
+                  - 'secretsmanager:*'
+                  - 'aoss:*''
                 Resource: '*'
 
   AuthHandlerFunction:
@@ -570,7 +573,7 @@ Resources:
             <div class="container">
                 <div class="main-column">
                     <h1 style="margin-bottom: var(--spacing)">Cloud Prototypes</h1>
-                    <div id="output"></div>
+                    
                     <div id="prototype-list"></div>
                 </div>
                 
@@ -587,6 +590,7 @@ Resources:
                         <div class="total-cost" style="display:none">$127.84</div>
                         <p>Free Tier & Billing</p>
                     </div>
+                    <div id="output"></div>
                 </div>
             </div>
 
@@ -1194,9 +1198,10 @@ Resources:
                   
                   stack_params.update({
                       'StackName': stack_name,
-                      'Capabilities': ['CAPABILITY_NAMED_IAM']
+                      'Capabilities': ['CAPABILITY_NAMED_IAM','CAPABILITY_NAMED_IAM','CAPABILITY_AUTO_EXPAND']
                   })
                   
+          
                   response = cloudformation.create_stack(**stack_params)
 
                   logger.info(f"Stack creation initiated: {response['StackId']}")
@@ -1703,4 +1708,3 @@ Outputs:
          Username: ${AdminEmail}
          Password: ${InitialPassword}
       4. After successful login, you'll be automatically redirected to the protected content
-
