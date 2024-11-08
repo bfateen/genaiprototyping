@@ -1,110 +1,1232 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: CloudFormation template to create an S3 bucket, package boto3 into a zip file, and upload it
+Transform: AWS::Serverless-2016-10-31
+Description: 'Combined template for Serverless RAG Q&A application using Knowledge Base, Agents, OpenSearch Serverless'
+
+Parameters:
+
+  AOSSCollectionName:
+    Description: Name of the Amazon OpenSearch Service Serverless (AOSS) collection.
+    Default: inagent-kb
+    Type: String
+    MinLength: 1
+    MaxLength: 21
+    AllowedPattern: ^[a-z0-9](-*[a-z0-9])*
+    ConstraintDescription: Must be lowercase or numbers with a length of 1-63 characters.
+
+  AOSSIndexName:
+    Description: Name of the vector index in the Amazon OpenSearch Service Serverless (AOSS) collection.
+    Default: inagent-io
+    Type: String
+
+  KnowledgeBaseName:
+    Default: instantagent-kb
+    Type: String
+    Description: The name of the knowledge base.
+
+  KnowledgeBaseDescription:
+    Default: Answer based only on information contained in knowledge base. 
+    Type: String
+    Description: The description of the knowledge base.
+
+  AgentName:
+    Default: instantagent1
+    Type: String
+    Description: The name of the agent.
 
 Resources:
-  # Create S3 Bucket
-  BedrockLayerS3Bucket:
-    Type: 'AWS::S3::Bucket'
-    Properties:
-      BucketName: !Sub '${AWS::StackName}-bedrock-layer-bucket'
-      AccessControl: Private
 
-  # Lambda Execution Role for S3 Access
+  AdminUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: 'leap-admin'
+      Path: "/"
+      
+
+  AdminUserSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: 'leap-admin-credentials'
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "cf-admin-user"}'
+        GenerateStringKey: "password"
+        PasswordLength: 16
+        ExcludeCharacters: '"@/\\'
+
+  AdminUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref AdminUser
+
+  AdminUserPolicy:
+    Type: AWS::IAM::UserPolicy
+    Properties:
+      UserName: !Ref AdminUser
+      PolicyName: AdminAccess
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: '*'
+            Resource: '*'
+
+  # First adding the Lambda Execution Role that was missing
   LambdaExecutionRole:
-    Type: "AWS::IAM::Role"
+    Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
+        Version: '2012-10-17'
         Statement:
-          - Effect: "Allow"
+          - Effect: Allow
             Principal:
-              Service:
-                - "lambda.amazonaws.com"
-            Action:
-              - "sts:AssumeRole"
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: "S3AccessPolicy"
+        - PolicyName: OpenSearchServerlessAccess
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: '2012-10-17'
             Statement:
-              - Effect: "Allow"
+              - Effect: Allow
+                Action: 
+                  - 'aoss:UpdateAccessPolicy'
+                  - 'aoss:CreateAccessPolicy'
+                  - 'aoss:GetAccessPolicy'
+                  - 'aoss:BatchGetCollection'
+                  - 'aoss:APIAccessAll'
+                  - 'aoss:ListCollections'
+                  - 'aoss:DescribeCollection'
+                Resource: '*'
+              - Effect: Allow
                 Action:
-                  - "s3:PutObject"
-                  - "s3:GetObject"
-                  - "s3:ListBucket"
-                Resource: "*"
+                  - 'aoss:CreateIndex'
+                  - 'aoss:UpdateIndex'
+                  - 'aoss:DescribeIndex'
+                  - 'aoss:ReadDocument'
+                  - 'aoss:WriteDocument'
+                Resource: !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/${AOSSCollectionName}'
 
-  # Lambda Function to Package boto3 and Upload to S3
-  PackageAndUploadLambdaFunction:
-    Type: "AWS::Lambda::Function"
+  # Basic Lambda Execution Role for Delete S3 Bucket function
+  LambdaBasicExecutionRole:
+    Type: AWS::IAM::Role
     Properties:
-      FunctionName: "PackageAndUploadLambdaFunction"
-      Handler: "index.handler"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${S3Bucket}
+                  - !Sub arn:aws:s3:::${S3Bucket}/*
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Description: Creates an Amazon S3 bucket to hold source data for the knowledge base.
+    Properties:
+      BucketName: !Join
+        - '-'
+        - - !Ref AOSSCollectionName
+          - !Sub ${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  DeleteS3Bucket:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Description: "Delete all objects in S3 bucket"
+      Timeout: 30
+      Role: !GetAtt 'LambdaBasicExecutionRole.Arn'
+      Runtime: python3.9
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref S3Bucket
+      Code:
+        ZipFile: |
+          import json, boto3, logging
+          import cfnresponse
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              logger.info("event: {}".format(event))
+              try:
+                  bucket = event['ResourceProperties']['BucketName']
+                  logger.info("bucket: {}, event['RequestType']: {}".format(bucket,event['RequestType']))
+                  if event['RequestType'] == 'Delete':
+                      s3 = boto3.resource('s3')
+                      bucket = s3.Bucket(bucket)
+                      for obj in bucket.objects.filter():
+                          logger.info("delete obj: {}".format(obj))
+                          s3.Object(bucket.name, obj.key).delete()
+
+                  sendResponseCfn(event, context, cfnresponse.SUCCESS)
+              except Exception as e:
+                  logger.info("Exception: {}".format(e))
+                  sendResponseCfn(event, context, cfnresponse.FAILED)
+
+          def sendResponseCfn(event, context, responseStatus):
+              responseData = {}
+              responseData['Data'] = {}
+              cfnresponse.send(event, context, responseStatus, responseData, "CustomResourcePhysicalID")
+
+  AmazonBedrockExecutionRoleForKnowledgeBase:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join
+        - '-'
+        - - AmazonBedrockExecutionRoleForKnowledgeBase
+          - !Ref AOSSCollectionName
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - bedrock.amazonaws.com
+                - aoss.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Sub "${AWS::AccountId}"
+              ArnLike:
+                "AWS:SourceArn": !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+      Policies:
+        - PolicyName: S3ReadOnlyAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:Get*
+                  - s3:List*
+                  - s3-object-lambda:Get*
+                  - s3-object-lambda:List*
+                Resource:
+                  - !Sub arn:aws:s3:::${S3Bucket}
+                  - !Sub arn:aws:s3:::${S3Bucket}/*
+        - PolicyName: AOSSAPIAccessAll
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource: !Sub arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*
+        - PolicyName: BedrockListAndInvokeModel
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:ListCustomModels
+                  - bedrock:InvokeModel
+                Resource: '*'
+        - PolicyName: OpenSearchServerlessAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - aoss:CreateCollection
+                  - aoss:DeleteCollection
+                  - aoss:CreateAccessPolicy
+                  - aoss:CreateSecurityPolicy
+                  - aoss:GetAccessPolicy
+                  - aoss:UpdateAccessPolicy
+                  - aoss:BatchGetCollection
+                  - aoss:CreateIndex
+                  - aoss:DeleteIndex
+                  - aoss:UpdateIndex
+                Resource: '*'
+
+  Collection:
+    Type: 'AWS::OpenSearchServerless::Collection'
+    Properties:
+      Name: !Ref AOSSCollectionName
+      Type: VECTORSEARCH
+      StandbyReplicas: DISABLED
+      Description: Collection to hold vector search data
+    DependsOn: EncryptionPolicy
+
+  NetworkPolicy:
+    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+    Properties:
+      Name: !Join
+        - '-'
+        - - !Ref AOSSCollectionName
+          - net-policy3
+      Type: network
+      Description: Network policy for the AOSS collection
+      Policy: !Sub >-
+        [{"Rules":[{"ResourceType":"collection","Resource":["collection/${AOSSCollectionName}"]}, {"ResourceType":"dashboard","Resource":["collection/${AOSSCollectionName}"]}],"AllowFromPublic":true}]
+
+  EncryptionPolicy:
+    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+    Properties:
+      Name: !Join
+        - '-'
+        - - !Ref AOSSCollectionName
+          - security-policy3
+      Type: encryption
+      Description: Encryption policy for the AOSS collection
+      Policy: !Sub >-
+        {"Rules":[{"ResourceType":"collection","Resource":["collection/${AOSSCollectionName}"]}],"AWSOwnedKey":true}
+
+  DataAccessPolicy:
+    Type: 'AWS::OpenSearchServerless::AccessPolicy'
+    Properties:
+      Name: 'instantagent-access-policy3'
+      Type: data
+      Description: Access policy for the AOSS collection
+      Policy: !Sub >-
+        [{"Description":"Access for cfn user","Rules":[{"ResourceType":"index","Resource":["index/${AOSSCollectionName}/*"],"Permission":[
+                    "aoss:CreateIndex",
+                    "aoss:UpdateIndex",
+                    "aoss:DescribeIndex",
+                    "aoss:ReadDocument",
+                    "aoss:WriteDocument"
+                  ]},
+        {"ResourceType":"collection","Resource":["collection/${AOSSCollectionName}"],"Permission":["aoss:*"]}],
+        "Principal":["${AdminUser.Arn}", "${AmazonBedrockExecutionRoleForKnowledgeBase.Arn}", "${LambdaExecutionRole.Arn}"]}]
+    DependsOn: AmazonBedrockExecutionRoleForKnowledgeBase
+
+  OpenSearchVectorIndexLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
-      Runtime: "python3.9"
-      Timeout: 300
-      MemorySize: 512
       Code:
         ZipFile: |
           import os
+          import sys
           import subprocess
-          import zipfile
+          import json
+          import traceback
           import boto3
-          import cfnresponse
+          import urllib3
+          import logging
+          import base64
+          import time
+          import random
+          import string
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def install_and_import_dependencies():
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "--target", "/tmp", "requests", "requests_aws4auth"])
+              sys.path.append('/tmp')
+              global requests, AWS4Auth
+              import requests
+              from requests_aws4auth import AWS4Auth
+              logger.info("Dependencies installed and imported successfully")
+
+          def generate_policy_version():
+              timestamp = int(time.time())
+              random_string = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+              version_string = f"{timestamp}-{random_string}"
+              return base64.b64encode(version_string.encode()).decode().rstrip('=')
+
+          def send_cfn_response(event, context, response_status, response_data, physical_resource_id=None, reason=None):
+              response_url = event['ResponseURL']
+              logger.info(f"CFN response URL: {response_url}")
+
+              response_body = {
+                  'Status': response_status,
+                  'Reason': reason or f"See the details in CloudWatch Log Stream: {context.log_stream_name}",
+                  'PhysicalResourceId': physical_resource_id or context.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'NoEcho': False,
+                  'Data': response_data
+              }
+
+              json_response_body = json.dumps(response_body)
+              logger.info(f"CFN response body: {json_response_body}")
+
+              headers = {
+                  'content-type': '',
+                  'content-length': str(len(json_response_body))
+              }
+
+              try:
+                  http = urllib3.PoolManager()
+                  response = http.request('PUT', response_url, headers=headers, body=json_response_body)
+                  logger.info(f"CFN response status code: {response.status}")
+              except Exception as e:
+                  logger.error(f"Error sending CFN response: {str(e)}")
 
           def handler(event, context):
+              logger.info(f"Received event: {json.dumps(event)}")
+              
               try:
-                  # Create directories
-                  layer_dir = "/tmp/bedrock-layer"
-                  python_dir = os.path.join(layer_dir, "python")
-                  os.makedirs(python_dir, exist_ok=True)
+                  install_and_import_dependencies()
 
-                  # Install boto3 into the layer's python directory
-                  print("Installing boto3...")
-                  subprocess.check_call(["pip3", "install", "-t", python_dir, "boto3"])
+                  region = os.environ['AWS_REGION']
+                  service = 'aoss'
+                  credentials = boto3.Session().get_credentials()
+                  awsauth = AWS4Auth(credentials.access_key, credentials.secret_key, region, service, session_token=credentials.token)
                   
-                  # Zip the layer content
-                  zip_file_path = "/tmp/bedrock-layer.zip"
-                  print(f"Creating zip file at {zip_file_path}...")
-                  with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                      for root, dirs, files in os.walk(layer_dir):
-                          for file in files:
-                              file_path = os.path.join(root, file)
-                              zipf.write(file_path, os.path.relpath(file_path, layer_dir))
-                  print(f"Zip file created successfully at {zip_file_path}.")
+                  collection_name = event['ResourceProperties']['CollectionName']
+                  index_name = event['ResourceProperties']['IndexName']
                   
-                  # Upload the zip file to S3
-                  s3_client = boto3.client('s3')
-                  bucket_name = event['ResourceProperties']['DestinationBucketName']
-                  s3_key = "bedrock-layer.zip"
-                  print(f"Uploading {zip_file_path} to s3://{bucket_name}/{s3_key}...")
-                  s3_client.upload_file(zip_file_path, bucket_name, s3_key)
-                  print(f"Upload successful.")
+                  client = boto3.client('opensearchserverless')
+                  
+                  logger.info(f"Attempting to get collection details for {collection_name}")
+                  collection_data = client.batch_get_collection(names=[collection_name])['collectionDetails'][0]
+                  collection_endpoint = collection_data['collectionEndpoint']
+                  
+                  logger.info(f"Collection endpoint: {collection_endpoint}")
 
-                  # Signal success
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {
-                      "Message": "Layer packaged and uploaded to S3 successfully.",
-                      "S3Bucket": bucket_name,
-                      "S3Key": s3_key
-                  })
+                  if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                      logger.info("Going to sleep")
+                      time.sleep(120)
+                      logger.info("Woke up")
+                      create_vector_index(collection_endpoint, index_name, awsauth)
+                      time.sleep(30)
+                  elif event['RequestType'] == 'Delete':
+                      delete_index(collection_endpoint, index_name, awsauth)
+
+                  send_cfn_response(event, context, 'SUCCESS', {"message": "Operation completed successfully"})
               except Exception as e:
-                  print(f"Error during packaging or uploading layer: {e}")
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {
-                      "Message": str(e)
-                  })
+                  logger.error(f"Error occurred: {str(e)}")
+                  logger.error(f"Traceback: {traceback.format_exc()}")
+                  send_cfn_response(event, context, 'FAILED', {"error": str(e)})
 
-  # Custom Resource to Trigger the Lambda Function
-  PackageAndUploadCustomResource:
-    Type: "AWS::CloudFormation::CustomResource"
+          def create_vector_index(endpoint, index_name, awsauth):
+              url = f'{endpoint}/{index_name}'
+              
+              index_body = {
+                  "settings": {
+                      "index.knn": True
+                  },
+                  "mappings": {
+                      "properties": {
+                          "vector": {
+                              "type": "knn_vector",
+                              "dimension": 1536,
+                              "method": {
+                                  "name": "hnsw",
+                                  "space_type": "l2",
+                                  "engine": "faiss"
+                              }
+                          }
+                      }
+                  }
+              }
+
+              headers = {"Content-Type": "application/json"}
+              
+              logger.info(f"Attempting to create index {index_name}")
+              logger.info(f"Request URL: {url}")
+              logger.info(f"Request body: {json.dumps(index_body)}")
+              
+              try:
+                  response = requests.put(url, auth=awsauth, json=index_body, headers=headers)
+                  logger.info(f"Index creation response status: {response.status_code}")
+                  logger.info(f"Index creation response body: {response.text}")
+                  response.raise_for_status()
+              except requests.exceptions.RequestException as e:
+                  logger.error(f"Request failed: {e}")
+                  if hasattr(e, 'response'):
+                      logger.error(f"Response status code: {e.response.status_code}")
+                      logger.error(f"Response body: {e.response.text}")
+                  raise
+
+          def delete_index(endpoint, index_name, awsauth):
+              url = f'{endpoint}/{index_name}'
+              logger.info(f"Attempting to delete index {index_name}")
+              logger.info(f"Request URL: {url}")
+              try:
+                  response = requests.delete(url, auth=awsauth)
+                  logger.info(f"Index deletion response status: {response.status_code}")
+                  logger.info(f"Index deletion response body: {response.text}")
+                  if response.status_code != 404:  # Ignore 404 errors on delete
+                      response.raise_for_status()
+              except requests.exceptions.RequestException as e:
+                  logger.error(f"Request failed: {e}")
+                  if hasattr(e, 'response'):
+                      logger.error(f"Response status code: {e.response.status_code}")
+                      logger.error(f"Response body: {e.response.text}")
+                  if response.status_code != 404:  # Ignore 404 errors on delete
+                      raise
+      Runtime: python3.8
+      Timeout: 300
+      MemorySize: 256
+
+  AttachPolicyLambda:
+    Type: AWS::Lambda::Function
     Properties:
-      ServiceToken: !GetAtt PackageAndUploadLambdaFunction.Arn
-      DestinationBucketName: !Ref BedrockLayerS3Bucket
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import json
+          import traceback
+          import time
+          import random
+          import string
+          import base64
+
+          def generate_policy_version():
+              timestamp = int(time.time())
+              random_string = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+              version_string = f"{timestamp}-{random_string}"
+              return base64.b64encode(version_string.encode()).decode().rstrip('=')
+
+          def handler(event, context):
+              client = boto3.client('opensearchserverless')
+              
+              try:
+                  print(f"Received event: {json.dumps(event)}")
+                  
+                  if event['RequestType'] in ['Create', 'Update']:
+                      policy_name = 'instantagent-access-policy3'
+                      collection_name = event['ResourceProperties']['CollectionName']
+                      iam_role_arn = event['ResourceProperties']['IAMRoleArn']
+                      kb_role_arn = event['ResourceProperties']['KBRoleArn']
+                      user_role_arn = event['ResourceProperties']['IAMUserArn']
+
+                      policy_version = generate_policy_version()
+                      print(f"Generated policy version: {policy_version}")
+
+                      print(f"IAM Role ARN: {iam_role_arn}")
+                      existing_policy = client.get_access_policy(name=policy_name, type='data')
+                      print(f"existing Policy content: {json.dumps(existing_policy)}")
+
+                      latest_version = existing_policy['accessPolicyDetail']['policyVersion']
+
+                      print(f"Latest policy version: {latest_version}")
+
+                      policy = [{
+                          "Rules": [{
+                              "ResourceType": "collection",
+                              "Resource": [f"collection/{collection_name}"],
+                              "Permission": ["aoss:*"]
+                          },
+                          {
+                              "ResourceType": "index",
+                              "Resource": [f"index/{collection_name}/*"],
+                              "Permission": [
+                                "aoss:CreateIndex",
+                                "aoss:UpdateIndex",
+                                "aoss:DescribeIndex",
+                                "aoss:ReadDocument",
+                                "aoss:WriteDocument",
+                                "aoss:*"
+                            ]
+                          }],
+                          "Principal": [iam_role_arn,kb_role_arn,user_role_arn]
+                      }]
+                      
+                      print(f"Updating policy: {policy_name}")
+                      print(f"Policy content: {json.dumps(policy)}")
+                      
+                      response = client.update_access_policy(
+                          name=policy_name,
+                          type='data',
+                          description='Updated by CloudFormation',
+                          policy=json.dumps(policy),
+                          policyVersion=latest_version
+                      )
+                      
+                      print(f"Update policy response: {json.dumps(response)}")
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  print(f"Traceback: {traceback.format_exc()}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+      Runtime: python3.8
+      Timeout: 60
+      MemorySize: 128
+
+  VectorIndexUpdate:
+    Type: Custom::OpenSearchServerlessVectorIndex
+    Properties:
+      ServiceToken: !GetAtt OpenSearchVectorIndexLambda.Arn
+      CollectionName: !Ref AOSSCollectionName
+      IndexName: !Ref AOSSIndexName
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    DependsOn: Collection
+
+  OpenSearchServerlessCollectionPolicyAttachment:
+    Type: Custom::OpenSearchServerlessCollectionPolicyAttachment
+    Properties:
+      ServiceToken: !GetAtt AttachPolicyLambda.Arn
+      CollectionName: !Ref AOSSCollectionName
+      PolicyName: !Ref DataAccessPolicy
+      IAMRoleArn: !GetAtt LambdaExecutionRole.Arn
+      KBRoleArn: !GetAtt AmazonBedrockExecutionRoleForKnowledgeBase.Arn
+      IAMUserArn: !GetAtt AdminUser.Arn
+    DependsOn: 
+      - Collection
+      - DataAccessPolicy
+
+  AmazonBedrockExecutionRoleForAgentsQA5:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AmazonBedrockExecutionRoleForAgents_QA5
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: bedrock.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+
+  KnowledgeBaseWithAoss:
+    Type: AWS::Bedrock::KnowledgeBase
+    DependsOn: 
+      - Collection
+      - VectorIndexUpdate
+    Properties:
+      Name: !Ref KnowledgeBaseName
+      Description: !Ref KnowledgeBaseDescription
+      RoleArn: !GetAtt AmazonBedrockExecutionRoleForKnowledgeBase.Arn
+      KnowledgeBaseConfiguration:
+        Type: "VECTOR"
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1"
+      StorageConfiguration:
+        Type: "OPENSEARCH_SERVERLESS"
+        OpensearchServerlessConfiguration:
+          CollectionArn: !GetAtt Collection.Arn
+          VectorIndexName: !Ref AOSSIndexName
+          FieldMapping:
+            VectorField: "vector"
+            TextField: "text"
+            MetadataField: "metadata"
+
+  SampleDataSource:
+    Type: AWS::Bedrock::DataSource
+    DependsOn: KnowledgeBaseWithAoss
+    Properties:
+      KnowledgeBaseId: !Ref KnowledgeBaseWithAoss
+      Name: !Ref S3Bucket
+      DataSourceConfiguration:
+        Type: "S3"
+        S3Configuration:
+          BucketArn: !GetAtt S3Bucket.Arn
+
+  AgentResource:
+    Type: AWS::Bedrock::Agent
+    DependsOn: 
+      - KnowledgeBaseWithAoss
+      - AmazonBedrockExecutionRoleForAgentsQA5
+    Properties:
+      AgentName: !Ref AgentName
+      AgentResourceRoleArn: !GetAtt AmazonBedrockExecutionRoleForAgentsQA5.Arn
+      AutoPrepare: true
+      FoundationModel: "amazon.titan-text-premier-v1:0"
+      Instruction: "You are an HR bot tasked with matching candidates to suitable roles based on their skill sets, experience, and qualifications."
+      Description: "AI Agent Bot powered by Amazon Bedrock"
+      IdleSessionTTLInSeconds: 900
+      KnowledgeBases:
+        - KnowledgeBaseId: !Ref KnowledgeBaseWithAoss
+          Description: !Ref KnowledgeBaseDescription
+          KnowledgeBaseState: ENABLED
+
+  BedrockAgentAlias:
+    Type: 'AWS::Bedrock::AgentAlias'
+    DependsOn: 
+      - AgentResource
+    Properties:
+      AgentId: !Ref AgentResource
+      AgentAliasName: 'prodalias'
+
+  # IAM Role for Lambda (unchanged)
+  AgentLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeAgent
+                  - bedrock-agent-runtime:InvokeAgent
+                Resource: '*'
+
+  # Lambda Function (unchanged)
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - AgentResource
+      - BedrockAgentAlias
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt AgentLambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          BEDROCK_AGENT_ID: !Ref AgentResource
+          BEDROCK_ALIAS_ID: !GetAtt BedrockAgentAlias.AgentAliasId
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import logging
+          import os
+          from botocore.exceptions import ClientError
+          # Set up logging
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          class BytesEncoder(json.JSONEncoder):
+              def default(self, obj):
+                  if isinstance(obj, bytes):
+                      return obj.decode('utf-8', errors='replace')
+                  return super().default(obj)
+
+          def parseparam(event):
+            try:
+                message=''
+                
+                # Check if message is directly in event (test invoke)
+                if isinstance(event, dict) and 'message' in event:
+                    message = event['message']
+                    
+                # Check if message is in body (API Gateway POST)
+                elif isinstance(event, dict) and 'body' in event:
+                    # Handle string body
+                    if isinstance(event['body'], str):
+                        import json
+                        body = json.loads(event['body'])
+                    else:
+                        body = event['body']
+                        
+                    message = body.get('message')
+                    
+                    return message
+                    
+                else:
+                    return ""
+                    
+                # Process message here
+                return message
+                
+            except Exception as e:
+                return ""
+
+          def lambda_handler(event, context):
+              client = boto3.client('bedrock-agent-runtime')
+              AGENT_ID = os.environ['BEDROCK_AGENT_ID']
+              ALIAS_ID = os.environ['BEDROCK_ALIAS_ID']
+              
+                  
+              user_message = parseparam(event)
+
+              # Log the boto3 version
+              try:
+                  # Send the message to the Bedrock agent with additional parameters
+                  response = client.invoke_agent(
+                      agentId=AGENT_ID, #'CYQACSRTBT',
+                      agentAliasId=ALIAS_ID, 
+                      sessionId='1234567',
+                      inputText=user_message,
+                      enableTrace=True
+                  )
+                  
+                  enable_trace=True
+                  # Process the response
+                  full_response = ""
+                  trace_info = []
+                  
+                  if 'completion' in response:
+                      for event in response['completion']:
+                          if 'chunk' in event:
+                              chunk = event['chunk']
+                              if 'bytes' in chunk:
+                                  chunk_content = chunk['bytes'].decode('utf-8')
+                                  try:
+                                      json_content = json.loads(chunk_content)
+                                      if 'completion' in json_content:
+                                          full_response += json_content['completion']
+                                  except json.JSONDecodeError:
+                                      # If it's not JSON, treat it as plain text
+                                      full_response += chunk_content
+                                  
+                                  if enable_trace and 'trace' in event:
+                                      trace_part = event['trace']
+                                      if 'trace' in trace_part:
+                                          trace_info.append(trace_part['trace'])
+                  else:
+                      # Handle non-streaming response
+                      full_response = response.get('completion', '')
+                      if enable_trace:
+                          all_trace_info = response.get('trace', [])
+                  
+                  logger.info(f"Full response: {full_response}")
+                  if enable_trace:
+                      logger.info(f"Trace information: {json.dumps(trace_info, indent=2)}")
+                  
+                  result = {
+                      'message': 'Successfully sent message to Bedrock agent',
+                      'agent_response': full_response,
+                  }
+                  
+                  if enable_trace:
+                      result['trace_info'] = trace_info
+
+                  full_response = full_response.replace('\n', '')
+                  full_response = full_response.replace('```', '')
+        
+
+                  fobj = json.loads(full_response)
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(fobj, cls=BytesEncoder),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*',
+                          'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+                          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+                      }
+                  }
+              except ClientError as e:
+                  logger.error(f"Bedrock Agent ClientError: {e}")
+                  return {
+                      'statusCode': 400,
+                      'body': json.dumps({
+                          'message': 'Error invoking Bedrock agent',
+                          'error': str(e)
+                      }, cls=BytesEncoder),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+              except Exception as e:
+                  logger.error(f"Unexpected error: {e}")
+                  logger.error(f"Event: {event}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({
+                          'message': 'Unexpected error when sending message to Bedrock agent',
+                          'error': str(e),
+                          'event': event
+                      }, cls=BytesEncoder),
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*'
+                      }
+                  }
+      Runtime: python3.9
+      Timeout: 30
+      MemorySize: 128
+
+  # API Gateway REST API
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: BedrockAgentAPI
+      Description: API Gateway for Bedrock Agent Lambda function
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # Proxy Resource to handle all paths
+  ProxyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: chat
+
+  # Proxy ANY Method
+  ProxyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ProxyResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
+          - LambdaArn: !GetAtt LambdaFunction.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  ####
+  OptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref ProxyResource
+      RestApiId: !Ref ApiGateway
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ProxyMethod
+      - OptionsMethod
+    Properties:
+      RestApiId: !Ref ApiGateway
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiDeployment
+      RestApiId: !Ref ApiGateway
+      StageName: prod
+
+  
+
+  # Lambda Permission for API Gateway
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/*/*
+
+  PrivateS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'AES256'
+      VersioningConfiguration:
+        Status: Enabled
+
+  BucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref PrivateS3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyUnsecuredTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: 
+              - !Sub '${PrivateS3Bucket.Arn}/*'
+              - !GetAtt PrivateS3Bucket.Arn
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+
+  S3UploaderRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3UploadAndSignPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub '${PrivateS3Bucket.Arn}/*'
+
+  S3UploaderFunction:
+    Type: 'AWS::Lambda::Function'
+    DependsOn:
+      - ApiGateway
+      - ApiStage
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt S3UploaderRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          
+          def handler(event, context):
+              if event['RequestType'] in ['Create', 'Update']:
+                  try:
+                      s3 = boto3.client('s3')
+                      bucket_name = event['ResourceProperties']['BucketName']
+                      api_gateway = event['ResourceProperties']['ApiGateway']
+                      aws_region = event['ResourceProperties']['AWSReg']
+                      
+                      # HTML content
+                      html_content = """
+                      <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <title>Chat with your documents</title>
+                            <style>
+                                body { 
+                                    font-family: Arial, sans-serif; 
+                                    max-width: 800px; 
+                                    margin: 0 auto; 
+                                    padding: 20px;
+                                    background-color: #f5f5f5;
+                                }
+                                #chat-container { 
+                                    height: 500px; 
+                                    overflow-y: auto; 
+                                    border: 1px solid #ddd; 
+                                    padding: 20px;
+                                    background-color: white;
+                                    border-radius: 8px;
+                                    margin-bottom: 20px;
+                                }
+                                #input-container { 
+                                    display: flex; 
+                                    gap: 10px;
+                                    margin-bottom: 20px;
+                                }
+                                #message-input { 
+                                    flex-grow: 1; 
+                                    padding: 10px;
+                                    border: 1px solid #ddd;
+                                    border-radius: 4px;
+                                    font-size: 16px;
+                                }
+                                button {
+                                    padding: 10px 20px;
+                                    background-color: #007bff;
+                                    color: white;
+                                    border: none;
+                                    border-radius: 4px;
+                                    cursor: pointer;
+                                }
+                                button:hover {
+                                    background-color: #0056b3;
+                                }
+                                .message {
+                                    margin-bottom: 15px;
+                                    padding: 10px;
+                                    border-radius: 4px;
+                                    max-width: 80%;
+                                }
+                                .user-message {
+                                    background-color: #007bff;
+                                    color: white;
+                                    margin-left: auto;
+                                }
+                                .assistant-message {
+                                    background-color: #e9ecef;
+                                    color: black;
+                                }
+                                #loading {
+                                    display: none;
+                                    text-align: center;
+                                    color: #666;
+                                    padding: 10px;
+                                }
+                            </style>
+                        </head>
+                        <body>
+                            <h1>Bedrock Chat</h1>
+                            <div id="chat-container"></div>
+                            <div id="loading">Assistant is typing...</div>
+                            <div id="input-container">
+                                <input type="text" id="message-input" placeholder="Type your message...">
+                                <button onclick="sendMessage()">Send</button>
+                            </div>
+                            <script>
+                                const apiUrl = 'AAAAA.execute-api.RRRR.amazonaws.com/prod/chat';
+                                const messageInput = document.getElementById('message-input');
+                                const chatContainer = document.getElementById('chat-container');
+                                const loadingIndicator = document.getElementById('loading');
+                                
+                                messageInput.addEventListener('keypress', function(e) {
+                                    if (e.key === 'Enter') {
+                                        sendMessage();
+                                    }
+                                });
+                                
+                                async function sendMessage() {
+                                    const message = messageInput.value.trim();
+                                    if (!message) return;
+                                    
+                                    messageInput.value = '';
+                                    appendMessageToChat(message, 'user');
+                                    loadingIndicator.style.display = 'block';
+                                    
+                                    try {
+                                        const response = await fetch('https://' + apiUrl, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json'
+                                            },
+                                            body: JSON.stringify({ message: message })
+                                        });
+                                        
+                                        const cleanJSON = await response.json();
+
+                                        loadingIndicator.style.display = 'none';
+                                        appendMessageToChat(cleanJSON['result'], 'assistant');
+                                    } catch (error) {
+                                        console.error('Error:', error);
+                                        loadingIndicator.style.display = 'none';
+                                        appendMessageToChat('Error: Failed to get response', 'assistant');
+                                    }
+                                }
+                                
+                                function appendMessageToChat(messageText, senderType) {
+                                    const messageElement = document.createElement('div');
+                                    messageElement.className = 'message ' + senderType + '-message';
+                                    messageElement.textContent = messageText;
+                                    chatContainer.appendChild(messageElement);
+                                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                                }
+                            </script>
+                        </body>
+                        </html>
+                      """
+                      
+                      html_content = html_content.replace('AAAAA', api_gateway)
+                      html_content = html_content.replace('RRRR', aws_region)
+
+                      # Upload the HTML file
+                      s3.put_object(
+                          Bucket=bucket_name,
+                          Key='index.html',
+                          Body=html_content,
+                          ContentType='text/html'
+                      )
+                      
+                      # Generate presigned URL (valid for 7 days - maximum allowed)
+                      presigned_url = s3.generate_presigned_url(
+                          'get_object',
+                          Params={
+                              'Bucket': bucket_name,
+                              'Key': 'index.html'
+                          },
+                          ExpiresIn=604800  # 7 days in seconds
+                      )
+                      
+                      responseData = {
+                          'SignedURL': presigned_url
+                      }
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+                  except Exception as e:
+                      print(f"Error: {str(e)}")
+                      cfnresponse.send(event, context, cfnresponse.FAILED, {})
+              else:
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+      Runtime: python3.9
+      Timeout: 30
+
+  UploadHTMLAndGenerateURL:
+    Type: 'Custom::S3Upload'
+    Properties:
+      ServiceToken: !GetAtt S3UploaderFunction.Arn
+      BucketName: !Ref PrivateS3Bucket
+      ApiGateway: !Ref ApiGateway
+      AWSReg: !Ref AWS::Region
 
 Outputs:
+  S3Bucket:
+    Value: !GetAtt S3Bucket.Arn
   S3BucketName:
-    Description: "Name of the S3 bucket where the file was uploaded"
-    Value: !Ref BedrockLayerS3Bucket
-
-  S3FileKey:
-    Description: "S3 key of the uploaded file"
-    Value: "bedrock-layer.zip"
+    Value: !Ref S3Bucket
+  DashboardURL:
+    Value: !GetAtt Collection.DashboardEndpoint
+  AmazonBedrockExecutionRoleForKnowledgeBase:
+    Value: !GetAtt AmazonBedrockExecutionRoleForKnowledgeBase.Arn
+  CollectionARN:
+    Value: !GetAtt Collection.Arn
+  AOSSVectorIndexName:
+    Description: vector index
+    Value: !Ref AOSSIndexName
+  Region:
+    Description: Deployed Region
+    Value: !Ref AWS::Region
+  KnowledgeBaseId:
+    Description: ID of the created Knowledge Base
+    Value: !Ref KnowledgeBaseWithAoss
+  AgentId:
+    Description: ID of the created Agent
+    Value: !Ref AgentResource
+  AgentRoleArn:
+    Description: ARN of the Agent execution role
+    Value: !GetAtt AmazonBedrockExecutionRoleForAgentsQA5.Arn
+  LambdaExecutionRoleArn:
+    Description: ARN of the Lambda execution role
+    Value: !GetAtt LambdaExecutionRole.Arn
+  LambdaFunctionName:
+    Description: Name of the Lambda function
+    Value: !Ref LambdaFunction
+  BackendURL:
+    Description: 'API Gateway endpoint URL for prod stage'
+    Value: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/chat
+  FrontendURL:
+    Description: 'Presigned URL for accessing the HTML file (valid for 7 days)'
+    Value: !GetAtt UploadHTMLAndGenerateURL.SignedURL
