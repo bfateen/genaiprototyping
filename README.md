@@ -1,6 +1,11 @@
-### LEAP is a web-based, open-source environment that allows pre-built prototypes to be launched instantly and modified within only 7 steps. It is designed for seamless integration with existing AWS accounts, requiring no modifications to the current AWS user interface. This approach ensures rapid deployment and maintains the security integrity of the user's AWS environment.
+### LEAP is a web-based, open-source environment that allows pre-built prototypes to be launched instantly and modified within only 7 steps. It is designed for seamless integration with existing AWS accounts, requiring no modifications to the current AWS user interface. 
+
+This solution  enables rapid deployment of full-stack AWS prototypes through a secure web interface. The system consists of two main components:
+1. A secure prototype environment installer
+2. Deployable prototype templates
 
 The environment is setup with the following these steps: 1/ User watches a short video that describes the simple setup process and basic info on CloudFormation and Amazon Bedrock model access, 2/ User requests and is granted access to an AI Model, 3/ User uploads the setup CloudFormation script which installs the web app and sets up all the necessary roles and permissions, 4/ User clicks on the URL for the web app to open it in their browser and chooses from pre-loaded prototypes, 5/ The CloudFormation stack is deployed on the backend and returns the new resources, 6/ Links to the assets are shown clearly to the user (frontend URL, API endpoint, link to Lambda function, etc.), 7/ A brief description about the generated resources and how they interact along with clickable links to 30 second videos that explain concepts (i.e. Prompt Engineering) and services (i.e. API Gateway) which creates a personalized learning path on the right side column.
+
 
 ### Main Features:
 1.	Dynamic loading of custom-built prototypes from a GitHub repository
@@ -22,7 +27,25 @@ The following initial custom prototypes for idea validation and MVPs will be inc
 - A landing page that collects signups for preview access with a Gen AI prompt-flow backend plus basic analytics
 - A‘wizard of oz’ prototype that analyzes uploaded documents with Gen AI using an Agent on Bedrock and returns an analysis. The second version of the environment includes the ability to customize the frontend using natural language for more flexibility in generating customized frontends plus the ability to continue development locally using SAM and AWS CDK.
 
-## Security
+
+## 🎯 Features
+
+- **Secure Web Interface**: Protected by Cognito authentication
+- **Dynamic Prototype Loading**: Automatically loads prototypes from a GitHub repository
+- **One-Click Deployment**: Deploy complex AWS architectures with a single click
+- **Real-time Status Updates**: Monitor deployment progress through the web interface
+- **Resource Management**: Automatic cleanup and proper resource handling
+
+## 🏗️ Architecture Overview
+
+### Environment Installer Stats
+- **Total AWS Services**: 12
+- **Custom Resources**: 4
+- **IAM Roles**: 5
+- **Lambda Functions**: 6
+- **API Gateway Endpoints**: 3
+
+## Security Features
 
 While our emphasis in this solution is on building rapid prototyping capabilities, security remains a critical consideration even as we optimize for speed and simplicity. Our primary security strategy centers on securing all endpoints and on isolation – so we will run all prototypes in dedicated sandbox AWS accounts, separate from production environments. This approach leverages AWS's strongest security boundary - account isolation - while allowing us to simplify other security controls that might otherwise create friction in the prototyping process.
 
@@ -40,3 +63,157 @@ We will use Coginto to secure the access to ensure:
 To validate the security posture of prototypes created through this solution, we will follow the Content Security Review process as well as use ‘Prowler’, an industry-standard automated security assessment tool that is widely used within AWS security teams. Prowler provides comprehensive scanning for misconfigurations and potential security issues, offering more reliability than manual security reviews. This automated approach helps identify subtle security gaps that could be easily overlooked during rapid prototyping phases.
 
 While we streamline security configurations to enable rapid experimentation, we maintain vigilance over fundamental security controls. Each prototype environment ensures proper implementation of basic security features such as client-side encryption and appropriate logging configurations. These foundational security measures are non-negotiable even in prototype environments, establishing good security practices from the start.
+
+
+## 🚀 Quick Start
+
+1. Clone this repository
+2. Deploy the environment installer:
+```bash
+aws cloudformation create-stack \
+  --stack-name prototype-env \
+  --template-body file://leap-installer-sec.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters \
+    ParameterKey=AdminEmail,ParameterValue=admin@example.com \
+    ParameterKey=InitialPassword,ParameterValue=Initial123!
+```
+
+3. Access the web interface using the URL from stack outputs
+4. Login with provided admin credentials
+5. Select and deploy prototypes
+
+## 🔧 Technical Details
+
+### Custom Resources
+The solution uses several custom resources for advanced functionality:
+
+#### 1. S3 Content Uploader
+```yaml
+ContentUploader:
+  Type: AWS::Lambda::Function
+  Properties:
+    Handler: index.handler
+    Code:
+      ZipFile: |
+        import boto3
+        import cfnresponse
+        
+        def handler(event, context):
+            try:
+                if event['RequestType'] in ['Create', 'Update']:
+                    s3 = boto3.client('s3')
+                    bucket = event['ResourceProperties']['BucketName']
+                    body = event['ResourceProperties']['Body']
+                    
+                    s3.put_object(
+                        Bucket=bucket,
+                        Key='protected.html',
+                        Body=body,
+                        ContentType='text/html'
+                    )
+```
+
+#### 2. Cognito User Creator
+```yaml
+CognitoUserCreator:
+  Type: AWS::Lambda::Function
+  Properties:
+    Handler: index.handler
+    Code:
+      ZipFile: |
+        def handler(event, context):
+            if event['RequestType'] in ['Create', 'Update']:
+                cognito = boto3.client('cognito-idp')
+                user_pool_id = event['ResourceProperties']['UserPoolId']
+                email = event['ResourceProperties']['AdminEmail']
+```
+
+### Available Prototypes
+
+#### 1. Bedrock Chat Application
+- **Services**: Lambda, API Gateway, S3
+- **Features**: 
+  - Real-time chat interface
+  - Integration with AWS Bedrock
+  - Serverless architecture
+- **Deployment Time**: ~5 minutes
+
+```yaml
+Resources:
+  ChatFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              client = boto3.client("bedrock-runtime")
+              response = client.converse(
+                  modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
+                  messages=[msg]
+              )
+```
+
+## 🔒 Security Considerations
+
+1. **Authentication & Authorization**
+   - Cognito User Pool with secure password policies
+   - API Gateway authorization
+   - IAM role least privilege principle
+
+2. **Data Protection**
+   - S3 bucket encryption
+   - HTTPS only access
+   - Secure parameter handling
+
+3. **Network Security**
+   - Private subnet deployment options
+   - CORS configuration
+   - API Gateway resource policies
+
+## 🛠️ Advanced Configuration
+
+### Environment Variables
+The installer supports several configuration parameters:
+
+```yaml
+Parameters:
+  AdminEmail:
+    Type: String
+    Description: Email address for the admin user
+  InitialPassword:
+    Type: String
+    Description: Initial password for the admin user
+    NoEcho: true
+```
+
+### Custom Domain Configuration
+To use a custom domain:
+
+1. Add certificate in ACM
+2. Configure API Gateway custom domain
+3. Update CloudFront distribution
+
+## 📊 CloudFormation Resource Count
+
+| Resource Type | Count |
+|--------------|-------|
+| Lambda Functions | 6 |
+| IAM Roles | 5 |
+| S3 Buckets | 1 |
+| API Gateway APIs | 3 |
+| Cognito Resources | 3 |
+| Custom Resources | 4 |
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
