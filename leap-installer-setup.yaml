@@ -572,7 +572,7 @@ Resources:
         <body>
             <div class="container">
                 <div class="main-column">
-                    <h1 style="margin-bottom: var(--spacing)">Cloud Prototypes</h1>
+                    <h1 style="margin-bottom: var(--spacing)">LEAP AWS Prototypes</h1>
                     
                     <div id="prototype-list"></div>
                 </div>
