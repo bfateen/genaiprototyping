@@ -148,7 +148,7 @@ CognitoUserCreator:
 
 ### Available Prototypes
 
-#### 1. Bedrock Chat Application
+### 1. Bedrock Chat Application
 - **Services**: Lambda, API Gateway, S3
 - **Features**: 
   - Real-time chat interface
