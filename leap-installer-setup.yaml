@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Secure static website using Cognito Hosted UI'
+Description: 'LEAP environment installer with Secure static website using Cognito Hosted UI'
 
 Parameters:
   AdminEmail:
@@ -568,6 +568,13 @@ Resources:
                 .service-node:hover .service-desc{
                     display:block;
                 }
+                 .truncated-link {
+                display: inline-block;
+                max-width: 500px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+              }
             </style>
         </head>
         <body>
@@ -832,7 +839,7 @@ Resources:
                     prototypes[index]['active']=true;
                     fulldata['prototypes'] = prototypes;
 
-                    $(dlinks).html('<p>Frontend: <a href="' + prototypes[index]['frontend'] + '">' + prototypes[index]['frontend'] + '</a><br>Backend: <a href="' + prototypes[index]['backend'] + '">' + prototypes[index]['backend'] + '</a></p>');
+                    $(dlinks).html('<p>Frontend: <a class="truncated-link" href="' + prototypes[index]['frontend'] + '">' + prototypes[index]['frontend'] + '</a><br>Backend: <a class="truncated-link"  href="' + prototypes[index]['backend'] + '">' + prototypes[index]['backend'] + '</a></p>');
 
                     progressBar.fadeOut(() => {
                         deploymentInfo.fadeIn();
@@ -913,7 +920,7 @@ Resources:
             // Simulate deployment progress
             let progress = 0;
             const interval = setInterval(() => {
-                progress += Math.random() * 5;
+                progress += Math.random() * 4;
                 if (progress >= 100) {
                     progress = 100;
                     clearInterval(interval);
