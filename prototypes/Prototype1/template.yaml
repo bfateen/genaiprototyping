@@ -5,7 +5,7 @@ Parameters:
   BucketName:
     Type: String
     Description: Name for the S3 bucket to host the static website
-    Default: bedrock-chat-frontend2
+    Default: bedrock-chat-frontend3
 
 Resources:
   
