@@ -75,7 +75,7 @@ Resources:
                   }
                   
                   response = client.converse(
-                      modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
+                      modelId="amazon.titan-text-premier-v1:0",
                       messages=[msg],
                       inferenceConfig={
                           "maxTokens": 512,
@@ -193,8 +193,143 @@ Resources:
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ChatAPI}/*/*/*
 
   #SECURED s3
+  # S3 Bucket Cleanup Function
+  S3CleanupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3CleanupPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                  - s3:GetObjectVersion
+                  - s3:ListBucketVersions
+                Resource: 
+                  - !Sub 'arn:aws:s3:::${BucketName}'
+                  - !Sub 'arn:aws:s3:::${BucketName}/*'
+
+  S3CleanupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt S3CleanupRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+          import time
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def delete_bucket_contents(bucket_name):
+              try:
+                  logger.info(f"Starting cleanup of bucket: {bucket_name}")
+                  s3 = boto3.client('s3')
+                  
+                  # Delete all object versions
+                  paginator = s3.get_paginator('list_object_versions')
+                  pages = paginator.paginate(Bucket=bucket_name)
+                  
+                  delete_list = []
+                  
+                  try:
+                      for page in pages:
+                          # Handle versions
+                          if 'Versions' in page:
+                              for version in page['Versions']:
+                                  delete_list.append({
+                                      'Key': version['Key'],
+                                      'VersionId': version['VersionId']
+                                  })
+                          
+                          # Handle delete markers
+                          if 'DeleteMarkers' in page:
+                              for marker in page['DeleteMarkers']:
+                                  delete_list.append({
+                                      'Key': marker['Key'],
+                                      'VersionId': marker['VersionId']
+                                  })
+                          
+                          if delete_list:
+                              logger.info(f"Deleting {len(delete_list)} objects")
+                              s3.delete_objects(
+                                  Bucket=bucket_name,
+                                  Delete={'Objects': delete_list}
+                              )
+                              delete_list = []
+                      
+                      # Final check for non-versioned objects
+                      paginator = s3.get_paginator('list_objects_v2')
+                      pages = paginator.paginate(Bucket=bucket_name)
+                      
+                      for page in pages:
+                          if 'Contents' in page:
+                              objects = [{'Key': obj['Key']} for obj in page['Contents']]
+                              if objects:
+                                  logger.info(f"Deleting {len(objects)} non-versioned objects")
+                                  s3.delete_objects(
+                                      Bucket=bucket_name,
+                                      Delete={'Objects': objects}
+                                  )
+                      
+                      logger.info(f"Successfully cleaned up bucket: {bucket_name}")
+                      return True
+                      
+                  except Exception as e:
+                      logger.error(f"Error during deletion: {str(e)}")
+                      return False
+                      
+              except Exception as e:
+                  logger.error(f"Error accessing bucket: {str(e)}")
+                  return False
+
+          def handler(event, context):
+              logger.info('Received event: %s', event)
+              response_data = {}
+              
+              try:
+                  bucket_name = event['ResourceProperties']['BucketName']
+                  
+                  if event['RequestType'] == 'Delete':
+                      # Attempt cleanup multiple times
+                      max_attempts = 3
+                      for attempt in range(max_attempts):
+                          logger.info(f"Cleanup attempt {attempt + 1} of {max_attempts}")
+                          if delete_bucket_contents(bucket_name):
+                              break
+                          if attempt < max_attempts - 1:
+                              time.sleep(5)  # Wait before retry
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                  
+              except Exception as e:
+                  logger.error(f"Error in handler: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, response_data)
+
+      Runtime: python3.9
+      Timeout: 300  # Increased timeout to 5 minutes
+      MemorySize: 256  # Increased memory
+
   PrivateS3Bucket:
     Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       BucketName: !Ref BucketName
       PublicAccessBlockConfiguration:
@@ -208,6 +343,13 @@ Resources:
               SSEAlgorithm: 'AES256'
       VersioningConfiguration:
         Status: Enabled
+
+  BucketCleanupResource:
+    Type: Custom::S3Cleanup
+    DependsOn: PrivateS3Bucket
+    Properties:
+      ServiceToken: !GetAtt S3CleanupFunction.Arn
+      BucketName: !Ref BucketName
 
   BucketPolicy:
     Type: 'AWS::S3::BucketPolicy'
