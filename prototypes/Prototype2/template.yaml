@@ -153,7 +153,12 @@ Resources:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
 
-  
+  BucketCleanupResource2:
+    Type: Custom::S3Cleanup
+    DependsOn: S3Bucket
+    Properties:
+      ServiceToken: !GetAtt S3CleanupFunction.Arn
+      BucketName: !Ref S3Bucket
 
   AmazonBedrockExecutionRoleForKnowledgeBase:
     Type: AWS::IAM::Role
@@ -964,6 +969,8 @@ Resources:
                 Resource: 
                   - !Sub 'arn:aws:s3:::${PrivateS3Bucket}'
                   - !Sub 'arn:aws:s3:::${PrivateS3Bucket}/*'
+                  - !Sub 'arn:aws:s3:::${S3Bucket}'
+                  - !Sub 'arn:aws:s3:::${S3Bucket}/*'
 
   S3CleanupFunction:
     Type: AWS::Lambda::Function
