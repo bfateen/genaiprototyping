@@ -710,9 +710,12 @@ Resources:
           import logging
           import os
           from botocore.exceptions import ClientError
+          import uuid
+          import re
+
           # Set up logging
           logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          #logger.setLevel(logging.INFO)
           class BytesEncoder(json.JSONEncoder):
               def default(self, obj):
                   if isinstance(obj, bytes):
@@ -749,6 +752,36 @@ Resources:
             except Exception as e:
                 return ""
 
+          def extract_result_from_raw_response(raw_response):
+              print(f"Attempting to extract result from: {raw_response}")  # Debug print
+              
+              try:
+                  # First attempt: try to find result between instruction and end
+                  pattern = r'"result":\s*"(.*?)"}'
+                  match = re.search(pattern, raw_response, re.DOTALL)
+                  if match:
+                      result = match.group(1)
+                      print(f"Found result using first pattern: {result}")  # Debug print
+                      return result
+                      
+                  # Second attempt: broader pattern
+                  pattern = r'"result":\s*"([^}]*)'
+                  match = re.search(pattern, raw_response, re.DOTALL)
+                  if match:
+                      result = match.group(1)
+                      print(f"Found result using second pattern: {result}")  # Debug print
+                      # Clean up any trailing quotes or backslashes
+                      result = result.rstrip('"\\ ')
+                      return result
+                      
+                  # If both patterns fail, print for debugging
+                  print("No match found with either pattern")
+                  return None
+                  
+              except Exception as e:
+                  print(f"Error in extract_result_from_raw_response: {e}")
+                  return None
+              
           def lambda_handler(event, context):
               client = boto3.client('bedrock-agent-runtime')
               AGENT_ID = os.environ['BEDROCK_AGENT_ID']
@@ -756,6 +789,7 @@ Resources:
               
                   
               user_message = parseparam(event)
+              session_id = str(uuid.uuid4())
 
               # Log the boto3 version
               try:
@@ -769,55 +803,48 @@ Resources:
                   )
                   
                   enable_trace=True
-                  # Process the response
+                  # Process the event stream response
                   full_response = ""
-                  trace_info = []
                   
-                  if 'completion' in response:
-                      for event in response['completion']:
-                          if 'chunk' in event:
-                              chunk = event['chunk']
-                              if 'bytes' in chunk:
-                                  chunk_content = chunk['bytes'].decode('utf-8')
-                                  try:
-                                      json_content = json.loads(chunk_content)
-                                      if 'completion' in json_content:
-                                          full_response += json_content['completion']
-                                  except json.JSONDecodeError:
-                                      # If it's not JSON, treat it as plain text
-                                      full_response += chunk_content
+                  for event_dict in response['completion']:
+                      # Handle chunk events which contain the actual response
+                      if 'chunk' in event_dict:
+                          chunk = event_dict['chunk']
+                          if 'bytes' in chunk:
+                              try:
+                                  print(f"Chunk data: {chunk['bytes'].decode('utf-8')}")
+                                  # Parse the bytes content as JSON
                                   
-                                  if enable_trace and 'trace' in event:
-                                      trace_part = event['trace']
-                                      if 'trace' in trace_part:
-                                          trace_info.append(trace_part['trace'])
-                  else:
-                      # Handle non-streaming response
-                      full_response = response.get('completion', '')
-                      if enable_trace:
-                          all_trace_info = response.get('trace', [])
+                                  chunk_data = json.loads(chunk['bytes'].decode('utf-8'))
+
+                                  if 'result' in chunk_data:
+                                      print(f"Found result: {chunk_data['result']}")
+                                      full_response += chunk_data['result']
+                              except json.JSONDecodeError:
+                                  # If not JSON, just decode the bytes directly
+                                  print(f"Not JSON event: {chunk['bytes'].decode('utf-8')}")
                   
-                  logger.info(f"Full response: {full_response}")
-                  if enable_trace:
-                      logger.info(f"Trace information: {json.dumps(trace_info, indent=2)}")
+                                  full_response += extract_result_from_raw_response(chunk['bytes'].decode('utf-8'))
+                                  
+                      # Print trace events for debugging
+                      elif 'trace' in event_dict:
+                          print(f"Trace event: {json.dumps(event_dict['trace'])}")
+                  
+                      
+                  if not full_response:
+                      full_response = "Unable to process response. Please check CloudWatch logs."
+                      
+                  full_response = full_response.strip()
+                  full_response = full_response.replace('\n', '<br>')
                   
                   result = {
                       'message': 'Successfully sent message to Bedrock agent',
-                      'agent_response': full_response,
+                      'result': full_response,
                   }
-                  
-                  if enable_trace:
-                      result['trace_info'] = trace_info
-
-                  full_response = full_response.replace('\n', '')
-                  full_response = full_response.replace('```', '')
-        
-
-                  fobj = json.loads(full_response)
                   
                   return {
                       'statusCode': 200,
-                      'body': json.dumps(fobj, cls=BytesEncoder),
+                      'body': json.dumps(result),
                       'headers': {
                           'Access-Control-Allow-Origin': '*',
                           'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
@@ -850,6 +877,7 @@ Resources:
                           'Access-Control-Allow-Origin': '*'
                       }
                   }
+
       Runtime: python3.9
       Timeout: 30
       MemorySize: 128
