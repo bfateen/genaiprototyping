@@ -589,6 +589,10 @@ Outputs:
     Description: 'Name of the created S3 bucket'
     Value: !Ref BucketName
 
+  S3BucketLink:
+    Description: 'Link to the created S3 bucket'
+    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${BucketName}
+
   FrontendURL:
     Description: URL for the S3 static website
     Value: !GetAtt UploadHTMLAndGenerateURL.SignedURL
