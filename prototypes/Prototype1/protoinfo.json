@@ -27,5 +27,11 @@
             "inputs":[],
             "outputs": []
         }
+    ],
+     "outputs": [
+        {
+            "id":"S3BucketLink",
+            "title":"Put your files here"
+        }
     ]
 }
