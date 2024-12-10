@@ -27,11 +27,5 @@
             "inputs":[],
             "outputs": []
         }
-    ],
-     "custom_outputs": [
-        {
-            "id":"S3BucketLink",
-            "title":"Put your files here"
-        }
     ]
 }
