@@ -1339,6 +1339,9 @@ Outputs:
     Value: !GetAtt S3Bucket.Arn
   S3BucketName:
     Value: !Ref S3Bucket
+  S3BucketLink:
+    Description: 'Link to the created S3 bucket'
+    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${S3Bucket}
   DashboardURL:
     Value: !GetAtt Collection.DashboardEndpoint
   AmazonBedrockExecutionRoleForKnowledgeBase:
