@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'LEAP environment installer with Secure static website using Cognito Hosted UI'
+Description: 'AWS LEAP environment installer'
 
 Parameters:
   AdminEmail:
@@ -19,6 +19,8 @@ Resources:
   # S3 Bucket
   WebsiteBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -29,6 +31,148 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+        
+  #SECURED s3
+  # S3 Bucket Cleanup Function
+  WebsiteCleanupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3CleanupPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                  - s3:GetObjectVersion
+                  - s3:ListBucketVersions
+                Resource: 
+                  - !Sub 'arn:aws:s3:::${WebsiteBucket}'
+                  - !Sub 'arn:aws:s3:::${WebsiteBucket}/*'
+
+  WebsiteCleanupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt WebsiteCleanupRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+          import time
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def delete_bucket_contents(bucket_name):
+              try:
+                  logger.info(f"Starting cleanup of bucket: {bucket_name}")
+                  s3 = boto3.client('s3')
+                  
+                  # Delete all object versions
+                  paginator = s3.get_paginator('list_object_versions')
+                  pages = paginator.paginate(Bucket=bucket_name)
+                  
+                  delete_list = []
+                  
+                  try:
+                      for page in pages:
+                          # Handle versions
+                          if 'Versions' in page:
+                              for version in page['Versions']:
+                                  delete_list.append({
+                                      'Key': version['Key'],
+                                      'VersionId': version['VersionId']
+                                  })
+                          
+                          # Handle delete markers
+                          if 'DeleteMarkers' in page:
+                              for marker in page['DeleteMarkers']:
+                                  delete_list.append({
+                                      'Key': marker['Key'],
+                                      'VersionId': marker['VersionId']
+                                  })
+                          
+                          if delete_list:
+                              logger.info(f"Deleting {len(delete_list)} objects")
+                              s3.delete_objects(
+                                  Bucket=bucket_name,
+                                  Delete={'Objects': delete_list}
+                              )
+                              delete_list = []
+                      
+                      # Final check for non-versioned objects
+                      paginator = s3.get_paginator('list_objects_v2')
+                      pages = paginator.paginate(Bucket=bucket_name)
+                      
+                      for page in pages:
+                          if 'Contents' in page:
+                              objects = [{'Key': obj['Key']} for obj in page['Contents']]
+                              if objects:
+                                  logger.info(f"Deleting {len(objects)} non-versioned objects")
+                                  s3.delete_objects(
+                                      Bucket=bucket_name,
+                                      Delete={'Objects': objects}
+                                  )
+                      
+                      logger.info(f"Successfully cleaned up bucket: {bucket_name}")
+                      return True
+                      
+                  except Exception as e:
+                      logger.error(f"Error during deletion: {str(e)}")
+                      return False
+                      
+              except Exception as e:
+                  logger.error(f"Error accessing bucket: {str(e)}")
+                  return False
+
+          def handler(event, context):
+              logger.info('Received event: %s', event)
+              response_data = {}
+              
+              try:
+                  bucket_name = event['ResourceProperties']['BucketName']
+                  
+                  if event['RequestType'] == 'Delete':
+                      # Attempt cleanup multiple times
+                      max_attempts = 3
+                      for attempt in range(max_attempts):
+                          logger.info(f"Cleanup attempt {attempt + 1} of {max_attempts}")
+                          if delete_bucket_contents(bucket_name):
+                              break
+                          if attempt < max_attempts - 1:
+                              time.sleep(5)  # Wait before retry
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                  
+              except Exception as e:
+                  logger.error(f"Error in handler: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, response_data)
+
+      Runtime: python3.9
+      Timeout: 300  # Increased timeout to 5 minutes
+      MemorySize: 256  # Increased memory
+
+  BucketCleanupResource:
+    Type: Custom::S3Cleanup
+    DependsOn: WebsiteBucket
+    Properties:
+      ServiceToken: !GetAtt WebsiteCleanupFunction.Arn
+      BucketName: !Ref WebsiteBucket
+      
 
 
   # Cognito User Pool with Hosted UI
@@ -75,6 +219,7 @@ Resources:
       AllowedOAuthFlowsUserPoolClient: true
       SupportedIdentityProviders:
         - COGNITO
+      
 
   # Lambda for URL signing and callback handling
   LambdaExecutionRole:
@@ -111,6 +256,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
                   - cloudformation:DescribeStacks
                   - cloudformation:DescribeStackEvents
                   - cloudformation:TagResource
@@ -163,6 +309,8 @@ Resources:
                   - 'lambda:*'
                   - 'secretsmanager:*'
                   - 'aoss:*'
+                  - 'states:CreateStateMachine'
+                  - 'states:StartExecution'
                 Resource: '*'
 
   AuthHandlerFunction:
@@ -200,7 +348,7 @@ Resources:
                           'Bucket': os.environ['BUCKET_NAME'],
                           'Key': 'protected.html'
                       },
-                      ExpiresIn=3600
+                      ExpiresIn=9600
                   )
                   
                   return {
@@ -362,7 +510,7 @@ Resources:
                 }
 
                 .container {
-                    max-width: 1400px;
+                    max-width: 1200px;
                     margin: 0 auto;
                     display: flex;
                     gap: var(--spacing);
@@ -428,6 +576,11 @@ Resources:
                     font-size: 0.85rem;
                 }
 
+                .explainer-link{
+                text-decoration:none;
+                color: #0044aa;
+                }
+
                 .progress-bar {
                     display: none;
                     height: 6px;
@@ -446,7 +599,7 @@ Resources:
 
                 .video-container {
                     position: relative;
-                    padding-bottom: 56.25%;
+                    padding-bottom: 15px;
                     height: 0;
                     overflow: hidden;
                 }
@@ -561,6 +714,13 @@ Resources:
                     min-height: 300px;
                 }
 
+                .prototype-card h3{
+                display:none;
+                }
+                .prototype-card.expanded h3{
+                display:block;
+                }
+
                 .service-desc{
                     display:none;
                 }
@@ -575,37 +735,305 @@ Resources:
                 overflow: hidden;
                 text-overflow: ellipsis;
               }
+
+              .launchbut{
+              padding:5px 10px;margin-top:30px;float:right;background:#002194;color:white;border-radius:7px;text-decoration:none;
+              }
+              .deletebut{
+                            padding:5px 10px;margin-top:0px;float:right;background:#fe3549;color:white;border-radius:7px;text-decoration:none;
+              }
+
+              
+              .overlay {
+                  display: none;
+                  position: fixed;
+                  top: 0;
+                  left: 0;
+                  width: 100%;
+                  height: 100%;
+                  background-color: rgba(0, 0, 0, 0.6);
+                  z-index: 9999;
+              }
+
+              .modal-popup {
+                  position: absolute;
+                  top: 50%;
+                  left: 50%;
+                  transform: translate(-50%, -50%);
+                  background-color: white;
+                  padding: 20px;
+                  border-radius: 8px;
+                  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                  max-width: 600px;
+                  width: 90%;
+              }
+
+              #modal-title {
+                  margin: 0 0 15px 0;
+                  color: #333;
+                  font-size: 1.5em;
+              }
+
+              #modal-message {
+                  margin-bottom: 20px;
+                  color: #666;
+              }
+
+              .models-table {
+                  width: 100%;
+                  overflow-x: auto;
+              }
+
+              .models-table table {
+                  width: 100%;
+                  border-collapse: collapse;
+              }
+
+              .models-table th,
+              .models-table td {
+                  padding: 12px;
+                  text-align: left;
+                  border-bottom: 1px solid #eee;
+              }
+
+              .models-table th {
+                  background-color: #f5f5f5;
+                  font-weight: 600;
+              }
+
+              .status-enabled {
+                  color: #00aa44;
+                  font-weight: 500;
+              }
+
+              .status-disabled {
+                  color: #ff4444;
+                  font-weight: 500;
+              }
+
+              .enable-button {
+                  padding: 6px 12px;
+                  background-color: #0066cc;
+                  color: white;
+                  border: none;
+                  border-radius: 4px;
+                  cursor: pointer;
+                  text-decoration: none;
+                  display: inline-block;
+              }
+
+              .enable-button:hover {
+                  background-color: #0052a3;
+              }
             </style>
         </head>
-        <body>
+        <body style="background:#f0eeef !important">
+        <style>    .top-nav {
+            width: 100%;
+            background-color: #000;
+            padding: 15px 0;
+            margin-bottom:20px;
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+        }
+
+        .logo {
+            color: #fff;
+            font-size: 24px;
+            font-weight: bold;
+            text-decoration: none;
+        }
+
+        .signup-btn {
+            background: #0066cc;
+            color: #fff;
+            padding: 8px 20px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .signup-btn:hover {
+            background: #0052a3;
+        }
+        </style>
+        <div class="top-nav">
+            <div class="nav-container">
+                <a href="#" class="logo"><img src="https://www.pikpng.com/pngl/b/524-5240809_aws-logo-svg-white-clipart.png" style="width:auto;height:25px;position:relative;top:5px;margin-right:10px;">LEAP - Instant Prototypes</a>
+                   <div><a id="editmodels" href="#" style="color:white;text-decoration:none;margin-right:15px;">Loading...</a><a href="https://aws.amazon.com/startups/credits" target="_blank" class="signup-btn">Apply for Activate credits</a></div>
+            </div>
+        </div>   
+
             <div class="container">
                 <div class="main-column">
-                    <h1 style="margin-bottom: var(--spacing)">LEAP AWS Prototypes</h1>
-                    
+                  <!--  <h1 style="margin-bottom: var(--spacing)">LEAP
+                 
+                    </h1>
+                    -->
                     <div id="prototype-list"></div>
                 </div>
                 
                 <div class="side-column">
-                    <div class="card">
+                    <!--<div class="card">
                         <h2>Welcome Guide</h2>
                         <div class="video-container">
                             <iframe width="360" height="215" src="https://www.youtube.com/embed/JBXSwvdJJ6Q?si=_Cq1hFC0nA0Dgqhk" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
                         </div>
+                    </div>-->
+
+                     <style>
+                .accordion {
+                width: 100%;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+              }
+
+              .accordion-item {
+                border-bottom: 1px solid #ddd;
+              }
+
+              .accordion-item:last-child {
+                border-bottom: none;
+              }
+
+              .accordion-header {
+                padding: 15px;
+                background-color: #f4f4f4;
+                cursor: pointer;
+                user-select: none;
+              }
+
+              .accordion-header:hover {
+                background-color: #ebebeb;
+              }
+
+              .accordion-content {
+                padding: 0 15px;
+                max-height: 0;
+            
+                overflow: hidden;
+                transition: max-height 0.3s ease-out;
+              }
+
+              .accordion-item .video-container {
+                  height:auto !important;
+              }
+
+              .accordion-item.active .accordion-content {
+                max-height: 400px; /* Adjust this value based on your content */
+                padding: 15px;
+              }
+
+              .accordion-header::after {
+                content: '+';
+                float: right;
+                font-weight: bold;
+              }
+
+              .accordion-item.active .accordion-header::after {
+                content: '-';
+              }
+
+              .video-container p {
+              margin-top:15px
+              }
+
+            </style>
+           
+
+            
+            <div class="card">
+                <div class="accordion">
+                    <div class="accordion-item active">
+                        <div class="accordion-header">Welcome Guide</div>
+                        <div class="accordion-content">
+                            
+                            <div class="video-container">
+                                <iframe width="360" height="215" src="https://www.youtube.com/embed/JBXSwvdJJ6Q?si=_Cq1hFC0nA0Dgqhk"
+                                    title="YouTube video player" frameborder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                    referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+                              <p>Welcome to LEAP! Watch the video above for a quick intro or launch one of the prototypes to the left. All resources will be created for you with guides on how to customize each. Click on any highlighted term to learn about it.</p>
+                            </div>
+                            
+                        </div>
                     </div>
-                    
+                <!--
+                    <div class="accordion-item">
+                        <div class="accordion-header">API Gateway</div>
+                        <div class="accordion-content">
+                            <div class="video-container">
+                                <iframe width="360" height="215" src="https://www.youtube.com/embed/JBXSwvdJJ6Q?si=_Cq1hFC0nA0Dgqhk"
+                                    title="YouTube video player" frameborder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                    referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+                            <p>S3 is A full-stack RAG application that enables intelligent document interactions.</p>
+                            <p><a href="#" style="margin-right:20px">Documentation</a><a href="#">Full video</a></p>
+                        </div>
+                        </div>
+                    </div>
+                
+                    <div class="accordion-item">
+                        <div class="accordion-header">Section 3</div>
+                        <div class="accordion-content">
+                            <p>Content for section 3 goes here. This can be any HTML content.</p>
+                        </div>
+                    </div>
+                -->
+                </div>
+
+            <!--
+                <h2>Welcome Guide</h2>
+                <div class="video-container">
+                    <iframe width="360" height="215" src="https://www.youtube.com/embed/JBXSwvdJJ6Q?si=_Cq1hFC0nA0Dgqhk" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+                </div>
+            -->
+            </div>
+                    <!--
                     <div class="card cost-card" onclick="window.open('https://us-east-1.console.aws.amazon.com/billing/home?region=us-east-1#/freetier');" style="cursor:pointer !important;">
                         <h2>Explore Costs</h2>
                         <div class="total-cost" style="display:none">$127.84</div>
                         <p>Free Tier & Billing</p>
                     </div>
-                    <div id="output"></div>
+                    -->
+                    <div style="" id="output"></div>
                 </div>
             </div>
+
+            <div id="overlay" class="overlay">
+              <div class="modal-popup">
+                  <h2 id="modal-title">Alert Title</h2>
+                  <div id="modal-message">Main message goes here</div>
+                  <div class="models-table">
+                      <table>
+                          <thead>
+                              <tr>
+                                  <th>Model Name</th>
+                                  <th>Status</th>
+                                  <th>Action</th>
+                              </tr>
+                          </thead>
+                          <tbody id="models-list">
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+          </div>
 
             
         <script>
                 var appinfo = [];
+                var models_access=[];
                 var fulldata=null;
+                var launching=false;
+                var deleting=false;
 
                 var prototypes = [
                     {
@@ -637,6 +1065,48 @@ Resources:
                     }
                 ];
 
+
+                function showModal(title, message, models) {
+                const overlay = document.getElementById('overlay');
+                const modalTitle = document.getElementById('modal-title');
+                const modalMessage = document.getElementById('modal-message');
+                const modelsList = document.getElementById('models-list');
+
+                // Set title and message
+                modalTitle.textContent = title;
+                modalMessage.textContent = message;
+
+                // Clear existing models
+                modelsList.innerHTML = '';
+
+                // Add models to the table
+                models.forEach(model => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                    <td>`+model.name+`</td>
+                    <td class="`+(model.enabled ? 'status-enabled' : 'status-disabled')+`">
+                        `+(model.enabled ? 'Enabled' : 'Not Enabled')+`
+                    </td>
+                    <td>
+                       `+(!model.enabled ?
+                                    `<a href="`+model.url+`" 
+                                target="_blank" 
+                                class="enable-button">Enable</a>` :
+                                    '')+`
+                    </td>
+                `;
+                            modelsList.appendChild(row);
+                        });
+
+                        // Show the overlay
+                        overlay.style.display = 'block';
+                    }
+
+                    // Function to hide the modal
+                    function hideModal() {
+                        document.getElementById('overlay').style.display = 'none';
+                    }
+
                 function GetServiceIcon(name)
                 {
                     for (var i=0;i<fulldata['files'].length;i++)
@@ -653,6 +1123,15 @@ Resources:
                 function renderPrototypes() {
                     const container = $('#prototype-list');
                     var pindex = 0;
+
+                    var modstr=''
+                    fulldata["models_access"].forEach(model => {
+                     if (model.enabled)
+                        modstr=modstr+'<option value="'+model.id+'">'+model.name+'</option>';
+                     });
+
+            modstr = '<select class="modelsel" style="display:block;margin-bottom:10px;background:white;border:1px solid #ccc;border-radius:8px;padding:5px;">'+modstr+'</select>';
+
                     prototypes.forEach(prototype => {
                         const servicesHtml = prototype.services.map((service, index) => 
                             '<div class="service-node" data-index="' + pindex + '" data-service="' + 
@@ -671,8 +1150,8 @@ Resources:
                         var fulldesc = LinkExplainers(prototype.fulldescription);
 
                         const card = $(
-                            '<div class="card prototype-card" data-id="' + prototype.id + '">' +
-                            '<div class="card-content">' +
+                            '<div class="card prototype-card" data-id="' + prototype.id + '" data-stackname="' + prototype.stackname + '">' +
+                            '<div class="card-content"><div style="float:right">'+modstr+'<a href="#" data-id="' + prototype.id + '" class="launchbut" style="">Launch</a></div>' +
                             '<div class="card-header">' +
                             '<img src="' + prototype.iconurl + '" alt="' + prototype.title + ' icon" class="card-icon">' +
                             '<div>' +
@@ -683,7 +1162,7 @@ Resources:
                             '<p>' + desc + '</p>' +
                             '<div class="card-services">' +
                             prototype.services.map(service => 
-                                '<span class="service-tag">' + service.name + '</span>'
+                                '<span class="service-tag">' + LinkExplainers(service.name) + '</span>'
                             ).join('') +
                             '</div>' +
                             '</div>' +
@@ -696,6 +1175,7 @@ Resources:
                             '<div class="deployment-status">' +
                             '<div class="status-dot"></div>' +
                             'Active' +
+                            '<a href="#" data-id="' + prototype.id + '" class="deletebut" style="">Delete</a><div class="timerdiv"></div>'+
                             '</div>' +
                             '</div>' +
                             '<div class="deployment-links"></div>' +
@@ -715,6 +1195,7 @@ Resources:
                 }
 
                 async function fetchGithubRepoData() {
+
                     try {
                     const response = await fetch('https://${GetGithubRepoApi}.execute-api.${AWS::Region}.amazonaws.com/default/default', {
                             method: 'GET',
@@ -734,7 +1215,23 @@ Resources:
 
                         prototypes = data['prototypes'];
                         appinfo = data["appinfo"];
+                        models_access = data["models_access"];
                         fulldata = data;
+
+                        var tote=0;
+
+                        for (const model of models_access) {
+                            if (model.enabled)
+                            {
+                                tote=tote+1;
+                                hasaccess=true;
+                            }
+                        }   
+
+                        if (!hasaccess)
+                          showModal("Bedrock Models", "You need to have access to at least one model to continue.", models_access);
+
+                        $('#editmodels').html(tote+' models enabled');
 
                         renderPrototypes();
                         saveToLocalStorage('myAppState', data);
@@ -752,16 +1249,125 @@ Resources:
 
                     const tkey = 'protoscripts/' + id + '/template.yaml';
 
+                    var replacements = [];
+
+                    if ($(".prototype-card[data-id='"+id+"']").find('.modelsel option:selected').length)
+                     replacements.push({Target:'amazon.titan-text-premier-v1:0',Replacement:$(".prototype-card[data-id='"+id+"']").find('.modelsel').val()});
+
+                    //$(".prototype-card[data-id='"+id+"']").find('.modelsel option:selected').length > 0 ? $(".prototype-card[data-id='"+id+"']").find('.modelsel') : null
+                  
                     try {
                         const initiateResponse = await fetch(apiUrl, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ templateKey: tkey, templateBucket: appinfo['bucket'] }),
+                            body: JSON.stringify({ templateKey: tkey, templateBucket: appinfo['bucket'], replacements: replacements }),
                         });
                         const initiateData = await initiateResponse.json();
                         if (initiateResponse.ok) {
                             output.innerHTML = 'Stack creation initiated. Stack ID: ' + initiateData.stackId;
+                            
+                            $(".prototype-card[data-id='"+id+"']").attr('data-stackname',initiateData.stackName);
+
+                            var prot = {};
+                                          var pindex = 0;
+
+                                          for (var i = 0; i < prototypes.length; i++)
+                                              if (prototypes[i]['id'] == id) {
+                                                  prot = prototypes[i];
+                                                  pindex = i;
+                                                  break;
+                                              }
+                            prototypes[pindex]['stackname']=initiateData.stackName;
+                            fulldata['prototypes'] = prototypes;
+                            saveToLocalStorage('myAppState', fulldata);
+
+
                             checkStatus(initiateData.stackName, id);
+                        } else {
+                            throw new Error(initiateData.error || 'Unknown error occurred');
+                        }
+                    } catch (error) {
+                        output.innerHTML = 'Error: ' + error.message;
+                    }
+                }
+
+                async function selfdestructStack(stackName,id) {
+                const output = document.getElementById('output');
+                const apiUrl = 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/self-destruct';
+
+                    try {
+                        const initiateResponse = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ stackName: stackName}),
+                        });
+                        const initiateData = await initiateResponse.json();
+                        if (initiateResponse.ok) {
+                          output.innerHTML = 'Stack auto-destroyed';
+                                             
+                          // checkStatus(stackName, id);
+
+                        } else {
+                            throw new Error(initiateData.error || 'Unknown error occurred');
+                        }
+                    } catch (error) {
+                        output.innerHTML = 'Error: ' + error.message;
+                    }
+                }
+
+                 function startCountdownTimer(pid, starttime = null)    
+                 {                // Set 2 hour countdown
+                    let countDownDate = starttime ? starttime : new Date().getTime() + (2 * 60 * 60 * 1000);
+                    
+                    // Create timer element
+                    let timerElement = document.createElement('div');
+                    timerElement.className = 'countdown-timer';
+                    timerElement.style.float = 'right';
+                    timerElement.style.fontSize = '14px';
+                    timerElement.style.color = 'black;';
+                    
+                    // Add timer to card header
+                    $('.prototype-card[data-id="'+pid+'"] .timerdiv').append(timerElement);
+                    
+                    // Update timer every second
+                    let timer = setInterval(function() {
+                        let now = new Date().getTime();
+                        let distance = countDownDate - now;
+                        
+                        let hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                        let minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                        let seconds = Math.floor((distance % (1000 * 60)) / 1000);
+                        
+                        timerElement.innerHTML = 'Auto-deletes in: '+hours+'h '+minutes+'m '+seconds+'s';
+                        
+                        // When countdown finishes
+                        if (distance < 0) {
+                            clearInterval(timer);
+                            timerElement.innerHTML = "Initiating auto-delete...";
+                            // Get stack name from prototype card
+                            let stackName = $('.prototype-card[data-id="'+pid+'"]').attr('data-stackname');
+                            // Call self destruct
+                            deleteStack(stackName, pid);
+                        }
+                    }, 1000);
+                }      
+
+                async function deleteStack(stackName,id) {
+                    const output = document.getElementById('output');
+                const apiUrl = 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/delete-stack';
+
+                    try {
+                        const initiateResponse = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ stackName: stackName}),
+                        });
+                        const initiateData = await initiateResponse.json();
+                        if (initiateResponse.ok) {
+                            output.innerHTML = 'Stack deletion initiated';
+
+                           checkStatus(stackName, id);
+
                         } else {
                             throw new Error(initiateData.error || 'Unknown error occurred');
                         }
@@ -784,38 +1390,55 @@ Resources:
                             const statusData = await statusResponse.json();
                             if (statusResponse.ok) {
                                 output.innerHTML += '<br>Status: ' + statusData.status;
-                                if (statusData.status.endsWith('_COMPLETE') || statusData.status.endsWith('_FAILED')) {
+                                if (statusData.status.endsWith('_COMPLETE') || statusData.status.endsWith('_FAILED') || statusData.status.includes('does not exist')) {
                                     if (statusData.error) {
                                         output.innerHTML += '<br>Error: ' + statusData.error;
                                     }
-                                    
-                                    if (statusData.outputs) {
-                                        var prot = {};
-                                        var pindex = 0;
 
-                                        for (var i = 0; i < prototypes.length; i++)
-                                            if (prototypes[i]['id'] == pid) {
-                                                prot = prototypes[i];
-                                                pindex = i;
-                                                prototypes[i]['outputs'] = statusData.outputs;
-                                                break;
-                                            }
+                                     launching=false;
+                                     deleting=false;
 
-                                        var outputs = statusData.outputs;
-                                        for (var key in outputs) {
-                                            if (outputs.hasOwnProperty(key)) {
-                                                console.log('Output: ' + key + ' = ' + outputs[key]);
+                                          var prot = {};
+                                          var pindex = 0;
 
-                                                if (key == "FrontendURL")
-                                                    prototypes[i]['frontend'] = outputs[key];
-                                                else if (key == "BackendURL")
-                                                    prototypes[i]['backend'] = outputs[key];
-                                            }
-                                        }
+                                          for (var i = 0; i < prototypes.length; i++)
+                                              if (prototypes[i]['id'] == pid) {
+                                                  prot = prototypes[i];
+                                                  pindex = i;
+                                                  prototypes[i]['outputs'] = statusData.outputs;
+                                                  break;
+                                              }
+
+
+                                    if (!statusData.status.includes('DELETE'))
+                                    {
+                                      if (statusData.outputs) {
+                                          
+                                          var outputs = statusData.outputs;
+                                          for (var key in outputs) {
+                                              if (outputs.hasOwnProperty(key)) {
+                                                  console.log('Output: ' + key + ' = ' + outputs[key]);
+
+                                                  if (key == "FrontendURL")
+                                                      prototypes[i]['frontend'] = outputs[key];
+                                                  else if (key == "BackendURL")
+                                                      prototypes[i]['backend'] = outputs[key];
+                                              }
+                                          }
+                                      }
+
+                                      PrototypeDeployed(pid, pindex);
+                                      saveToLocalStorage('myAppState', fulldata);
+
+                                      selfdestructStack(stackName,pid);
+                                      startCountdownTimer(pid);
+
                                     }
-
-                                    PrototypeDeployed(pid, pindex);
-                                    saveToLocalStorage('myAppState', fulldata);
+                                    else
+                                    {
+                                       PrototypeDeleted(pid, pindex);
+                                       saveToLocalStorage('myAppState', fulldata);
+                                    }
 
                                     break;
                                 }
@@ -826,6 +1449,23 @@ Resources:
                         }
                     } catch (error) {
                         output.innerHTML += '<br>Error checking status: ' + error.message;
+
+                        if (error.message.includes('does not exist'))
+                        {
+                          var prot = {};
+                                          var pindex = 0;
+
+                                          for (var i = 0; i < prototypes.length; i++)
+                                              if (prototypes[i]['id'] == pid) {
+                                                  prot = prototypes[i];
+                                                  pindex = i;
+                                                  break;
+                                              }
+
+                           console.log('deleted');
+                           PrototypeDeleted(pid, pindex);
+                           saveToLocalStorage('myAppState', fulldata);
+                        }
                     }
                 }
 
@@ -837,9 +1477,24 @@ Resources:
                     const deploymentInfo = card.find('.deployment-info');
 
                     prototypes[index]['active']=true;
+
+                    if (!prototypes[index]['deletetimer'])
+                      prototypes[index]['deletetimer']= new Date().getTime() + (2 * 60 * 60 * 1000);
+
                     fulldata['prototypes'] = prototypes;
 
-                    $(dlinks).html('<p>Frontend: <a class="truncated-link" href="' + prototypes[index]['frontend'] + '">' + prototypes[index]['frontend'] + '</a><br>Backend: <a class="truncated-link"  href="' + prototypes[index]['backend'] + '">' + prototypes[index]['backend'] + '</a></p>');
+                    $(dlinks).html('<p>Frontend: <a target="_blank" class="truncated-link" href="' + prototypes[index]['frontend'] + '">' + prototypes[index]['frontend'] + '</a><br>Backend: <a target="_blank"  class="truncated-link"  href="' + prototypes[index]['backend'] + '">' + prototypes[index]['backend'] + '</a></p>');
+
+                    if (prototypes[index]['custom_outputs'] && prototypes[index]['custom_outputs'].length)
+                    {
+                      for (var c=0;c<prototypes[index]['custom_outputs'].length;c++)
+                      {
+                        var kid = prototypes[index]['custom_outputs'][c]['id'];
+                        if (prototypes[index]['outputs'].hasOwnProperty(kid))
+                          $(dlinks).append('<p><a target="_blank" class="truncated-link" href="' + prototypes[index]['outputs'][kid] + '">' +prototypes[index]['custom_outputs'][c]['title'] + '</a></p>');
+                      }
+                    }
+                    
 
                     progressBar.fadeOut(() => {
                         deploymentInfo.fadeIn();
@@ -847,12 +1502,35 @@ Resources:
                     });
                 }
 
+                function PrototypeDeleted(id, index) {
+                    const card = $(`.prototype-card[data-id="` + id + `"]`);
+                    const progressBar = card.find('.progress-bar');
+                    const architectureDiagram = card.find('.architecture-diagram');
+                    const dlinks = card.find('.deployment-links');
+                    const deploymentInfo = card.find('.deployment-info');
+                    const cardContent = card.find('.card-content');
+
+                    prototypes[index]['active']=false;
+                    prototypes[index]['deletetimer']=null;
+                    prototypes[index]['stackname'] = "";
+                    fulldata['prototypes'] = prototypes;
+
+                    cardContent.fadeIn();
+                    card.removeClass('expanded');
+
+
+                    deploymentInfo.fadeOut();
+                    architectureDiagram.fadeOut();
+                    
+                }
+
                  function GetServiceID(pid,service)
                 {
                         var outputs = prototypes[pid]['outputs'];
 
-                        alert(pid+' '+JSON.stringify(outputs));
-                    
+                        //alert(pid+' '+JSON.stringify(outputs));
+
+                        
                         for (var key in outputs) {
                             if (outputs.hasOwnProperty(key)) {
                                 console.log('GetServiceID Output: ' + key + ' = ' + outputs[key]);
@@ -893,11 +1571,21 @@ Resources:
 
                 function ShowExplainer(index)
                 {
-                    var explainers = appinfo.explainers;
-                    var item = explainers[index];
+                      var explainers = appinfo.explainers;
+                      var item = explainers[index];
 
-                     $('.side-column').prepend('<div class=\"card\"><h2>Explainer '+item['name']+'</h2><div class=/"video-container/"><iframe width="320" height="215" src="'+item['videoURL']+'"></iframe></div> <p>'+item['description']+'</p></div>');
+                      if ($(".accordion-item[data-eid='" + index + "']").length)
+                          $(".accordion-item[data-eid='" + index + "']").find('.accordion-header').click();
+                      else
+                      {
+                        var doclinks = item['links'].length ? '<a target="_blank" href="'+item['links'][0]+'" style="margin-right:20px">Documentation</a>' : '';
+                          $('.accordion').append('<div class="accordion-item" data-eid="' + index + '"> <div class="accordion-header">' + item['name'] + '</div> <div class="accordion-content"> <div class="video-container"> <iframe width="360" height="215" src="' + item['videoURL'] + '" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe> <p>' + item['description'] + '</p><p>'+doclinks+'</p></div> </div> </div>');
+                          $(".accordion-item[data-eid='" + index + "']").find('.accordion-header').click();
+                      }
+                }
 
+                const getRandomNumber = (min, max) => {
+                    return Math.floor(Math.random() * (max - min + 1)) + min;
                 }
 
                 function deployPrototype(id) {
@@ -920,11 +1608,17 @@ Resources:
             // Simulate deployment progress
             let progress = 0;
             const interval = setInterval(() => {
-                progress += Math.random() * 4;
+
+                if (progress<65)
+                  progress += getRandomNumber(1,5);              
+                   else
+                  progress += getRandomNumber(1,3);                 
+
                 if (progress >= 100) {
                     progress = 100;
                     clearInterval(interval);
                     setTimeout(() => {
+
                        
                     }, 1000);
                 }
@@ -981,6 +1675,11 @@ Resources:
                         card.addClass('expanded');
                         cardContent.fadeOut();
                           PrototypeDeployed(prototype.id, pindex);
+
+                        if (prototype.active && (prototype.deletetimer))
+                        {
+                          startCountdownTimer(prototype.id, prototype.deletetimer);
+                        }
                     }
                     pindex++;
                 });
@@ -991,13 +1690,87 @@ Resources:
             }
             else
             fetchGithubRepoData();
+
+               $(document).on('click', '.accordion-header', function () {
+
+                           const accordionItem = this.parentElement;
+
+                        // Get all accordion items
+                        const allAccordionItems = document.querySelectorAll('.accordion-item');
+
+                        // Remove active class from all items
+                        allAccordionItems.forEach(item => {
+                            if (item !== accordionItem) {
+                                item.classList.remove('active');
+                                $(item).find('.accordion-content').css('maxHeight','');
+                                $(item).find('.accordion-content').css('minHeight','');
+                                //min-height:400px;
+                            }
+                        });
+
+                        // Toggle active class on clicked item
+                        accordionItem.classList.toggle('active');
+
+                        const computedStyle = window.getComputedStyle($(accordionItem).find('.video-container')[0]);
+                        const height = parseFloat(computedStyle.height)+15;
+                
+                        $(accordionItem).find('.accordion-content').css('maxHeight', height+'px');
+                        $(accordionItem).find('.accordion-content').css('minHeight','400px');
+
+                });
+
+                     
+
+                    $(document).on('click', '#overlay', function(e) {
+                     //e.preventDefault();
+
+                        if (e.target === this) {
+                        hideModal();
+                        }
+
+
+                      });
+        
+                    $(document).on('click', '#editmodels', function(e) {
+                      e.preventDefault();
+
+                      showModal("Bedrock Models", "You need to have access to at least one model to continue.", fulldata["models_access"]);
+
+
+                    });
                     
-                    $(document).on('click', '.prototype-card', function() {
-                        if (!$(this).find('.deployment-info').is(':visible')) {
+                    $(document).on('click', '.launchbut', function() {
+
+                    if (launching)
+                    {
+                      alert('Please wait until current launch completes...');
+                      return;
+                    }
+
+                    launching=true;
+
+                        if (!$(this).parent().find('.deployment-info').is(':visible')) {
                             const id = $(this).data('id');
                             deployPrototype(id);
                         }
                     });
+
+                   $(document).on('click', '.deletebut', function() {
+
+                   if (deleting)
+                    {
+                      alert('Please wait until current delete completes...');
+                      return;
+                    }
+
+                    deleting=true;
+
+                    var id = $(this).data('id');
+                    var stackname = $(".prototype-card[data-id='"+id+"']").attr('data-stackname');
+                    deleteStack(stackname,id);
+
+                   });
+       
 
                     $(document).on('click', '.service-node', function() {
                         var pindex = $(this).data('index');
@@ -1011,6 +1784,8 @@ Resources:
                     url = "https://console.aws.amazon.com/lambda/home?region=${AWS::Region}#/functions/" + outputs.LambdaFunctionName;
                 } else if (service === 'apigateway' && outputs.ApiEndpoint) {
                     url = "https://console.aws.amazon.com/apigateway/home?region=${AWS::Region}#/apis/" + outputs.ApiEndpoint;
+                } else   if (service === 'bedrock') {
+                    url = "https://us-east-1.console.aws.amazon.com/bedrock/home" ;
                 }
 
                         if (url) {
@@ -1186,11 +1961,54 @@ Resources:
 
               try:
                   body = json.loads(event['body'])
-                  template_body = body.get('templateBody')
                   template_key = body.get('templateKey')
                   template_bucket = body.get('templateBucket')
+                  replacements = body.get('replacements', [])
 
-                  if template_body:
+                  if len(replacements):
+                      template_body=''
+                      # Read content from S3
+                      try:
+                          s3 = boto3.client('s3')
+                          response = s3.get_object(Bucket=template_bucket, Key=template_key)
+                          
+                          # Handle large files by streaming
+                          chunk_size = 1024 * 1024  # 1MB chunks
+                          content = []
+                          stream = response['Body']
+                          
+                          for chunk in iter(lambda: stream.read(chunk_size), b''):
+                              content.append(chunk)
+                          
+                          template_body = b''.join(content).decode('utf-8')
+                          
+                          result = template_body
+                          
+                          # Perform replacements
+                          for item in replacements:
+                              
+                              target = item.get('Target', '')
+                              replacement = item.get('Replacement', '')
+                              
+                              if target:
+                                  # Count occurrences before replacement
+                                  occurrences = result.count(target)
+                                  
+                                  # Perform replacement
+                                  new_result = result.replace(target, replacement)
+                                  
+                                  result = new_result
+                          
+                          template_body=result
+
+                          
+                      except Exception as e:
+                          
+                          return {
+                              'statusCode': 404,
+                              'body': f"error: {e}"
+                          }
+                          
                       stack_params = {
                           'TemplateBody': template_body
                       }
@@ -1301,6 +2119,215 @@ Resources:
       Runtime: python3.8
       Timeout: 30
 
+  DeleteStackFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: DeleteStackFunction
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              logger.info(f"Received event: {json.dumps(event)}")
+              
+              cloudformation = boto3.client('cloudformation')
+              
+              headers = {
+                  'Access-Control-Allow-Origin': '*',
+                  'Access-Control-Allow-Headers': 'Content-Type',
+                  'Access-Control-Allow-Methods': 'OPTIONS,DELETE'
+              }
+              
+              try:
+                  body = json.loads(event['body'])
+                  stack_name = body.get('stackName')
+                  
+                  if not stack_name:
+                      raise ValueError("stackName must be provided")
+                      
+                  logger.info(f"Deleting stack: {stack_name}")
+                  
+                  response = cloudformation.delete_stack(
+                      StackName=stack_name
+                  )
+                  
+                  logger.info(f"Stack deletion initiated for {stack_name}")
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'message': 'Stack deletion initiated',
+                          'stackName': stack_name
+                      })
+                  }
+                  
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({'error': str(e)})
+                  }
+      Runtime: python3.8
+      Timeout: 30
+
+  SelfDestructFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: SelfDestructFunction
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          import json
+          import time
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              # Create clients
+              sfn = boto3.client('stepfunctions')
+              iam = boto3.client('iam')
+
+              DELETE_STACK_FUNCTION_ARN = '${DeleteStackFunction.Arn}'
+
+
+              body = json.loads(event['body'])
+              stack_name = body.get('stackName')
+              
+              # Create IAM Role for Step Functions
+              role_name = f'StepFunctionsRole-{int(time.time())}'
+              
+              # Trust policy for Step Functions
+              trust_policy = {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                      {
+                          "Effect": "Allow",
+                          "Principal": {
+                              "Service": "states.amazonaws.com"
+                          },
+                          "Action": "sts:AssumeRole"
+                      }
+                  ]
+              }
+              
+              try:
+                  # Create IAM role
+                  role_response = iam.create_role(
+                      RoleName=role_name,
+                      AssumeRolePolicyDocument=json.dumps(trust_policy)
+                  )
+                  
+                  logger.info(f"role created: {role_name}")
+
+                  
+                  # Allow Step Functions to invoke Lambda
+                  lambda_policy = {
+                      "Version": "2012-10-17",
+                      "Statement": [
+                          {
+                              "Effect": "Allow",
+                              "Action": [
+                                  "lambda:InvokeFunction"
+                              ],
+                              "Resource": [
+                                  DELETE_STACK_FUNCTION_ARN
+                              ]
+                          }
+                      ]
+                  }
+                  
+                  # Attach the policy to the role
+                  iam.put_role_policy(
+                      RoleName=role_name,
+                      PolicyName='StepFunctionsLambdaInvoke',
+                      PolicyDocument=json.dumps(lambda_policy)
+                  )
+                  
+                  # Wait for role to propagate
+                  time.sleep(10)
+                  
+                  logger.info(f"creating state_machine_definition")
+                  
+                  # State machine definition
+                  state_machine_definition = {
+                      "Comment": "A state machine that waits and then invokes a Lambda function with parameters",
+                      "StartAt": "WaitState",
+                      "States": {
+                          "WaitState": {
+                              "Type": "Wait",
+                              "Minutes": 120,
+                              "Next": "InvokeLambda"
+                          },
+                          "InvokeLambda": {
+                              "Type": "Task",
+                              "Resource": "arn:aws:states:::lambda:invoke",
+                              "Parameters": {
+                                  "FunctionName": DELETE_STACK_FUNCTION_ARN,
+                                  "Payload": {
+                                      "body": "{\"stackName\": \""+stack_name+"\"}"
+                                  }
+                              },
+                              "End": True
+                          }
+                      }
+                  }
+                  
+                  # Create state machine
+                  response = sfn.create_state_machine(
+                      name=f'DelayedLambdaExecution-{int(time.time())}',
+                      definition=json.dumps(state_machine_definition),
+                      roleArn=role_response['Role']['Arn'],
+                      type='STANDARD'
+                  )
+                  
+                  logger.info(f"created state_machine_definition")
+
+                  
+                  # Start execution of the state machine
+                  execution = sfn.start_execution(
+                      stateMachineArn=response['stateMachineArn']
+                  )
+
+                  headers = {
+                  'Access-Control-Allow-Origin': '*',
+                  'Access-Control-Allow-Headers': 'Content-Type',
+                  'Access-Control-Allow-Methods': 'OPTIONS,POST'
+                  }
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'message': 'State machine created and executed successfully',
+                          'stateMachineArn': response['stateMachineArn'],
+                          'executionArn': execution['executionArn']
+                      })
+                  }
+                  
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'error': str(e)
+                      })
+                  }
+      Runtime: python3.8
+      Timeout: 30
+
   ApiGatewayRestApi:
     Type: 'AWS::ApiGateway::RestApi'
     Properties:
@@ -1402,6 +2429,104 @@ Resources:
           ResponseModels:
             application/json: 'Empty'
 
+  DeleteStackResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'delete-stack'
+
+  DeleteStackMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref DeleteStackResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeleteStackFunction.Arn}/invocations'
+
+  DeleteStackOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref DeleteStackResource
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: 'Empty'
+
+
+  SelfDestructResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'self-destruct'
+
+  SelfDestructMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref SelfDestructResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SelfDestructFunction.Arn}/invocations'
+
+  SelfDestructOptionsMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref SelfDestructResource
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          ResponseModels:
+            application/json: 'Empty'
+
+
   ApiGatewayDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -1409,6 +2534,10 @@ Resources:
       - InitiateStackOptionsMethod
       - CheckStatusMethod
       - CheckStatusOptionsMethod
+      - DeleteStackMethod
+      - DeleteStackOptionsMethod
+      - SelfDestructMethod
+      - SelfDestructOptionsMethod
     Properties:
       RestApiId: !Ref ApiGatewayRestApi
       StageName: 'prod'
@@ -1429,6 +2558,22 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*'
 
+  LambdaApiGatewayInvokeDeleteStack:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt DeleteStackFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*'
+
+  LambdaApiGatewayInvokeSelfDestruct:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt SelfDestructFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*'
+
   GetGithubRepoFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -1446,6 +2591,51 @@ Resources:
           import boto3
           import os
           from pathlib import Path
+          from typing import List, Dict
+
+          def check_bedrock_model_access(model_ids: List[Dict] = None) -> List[Dict]:
+            try:
+                # Initialize Bedrock client
+                bedrock = boto3.client('bedrock')
+                
+                # Get list of all available models
+                response = bedrock.list_foundation_models()
+                
+                available_models = {
+                    model['modelId']: model['modelArn']
+                    for model in response['modelSummaries']
+                }
+                
+                # Process each model in the input list
+                for model in model_ids:
+                    try:
+                        model_id = model['id']  # Get the ID from the dictionary
+                        
+                        if model_id not in available_models:
+                            model['enabled'] = False
+                            continue
+                        
+                        # Try to invoke the model with a minimal request
+                        bedrock.get_foundation_model(modelIdentifier=model_id)
+                        model['enabled'] = True
+                        
+                    except bedrock.exceptions.AccessDeniedException:
+                        model['enabled'] = False
+                    except bedrock.exceptions.ValidationException:
+                        # Model exists but might not be enabled in the region
+                        model['enabled'] = False
+                    except Exception as e:
+                        print(f"Unexpected error checking {model_id}: {str(e)}")
+                        model['enabled'] = False
+                        
+                return model_ids
+            
+            except Exception as e:
+                print(f"Error initializing Bedrock client: {str(e)}")
+                # In case of error, return original list with enabled=False
+                for model in model_ids:
+                    model['enabled'] = False
+                return model_ids
 
           def get_content_type(filename):
               extension = os.path.splitext(filename)[1].lower()
@@ -1479,6 +2669,16 @@ Resources:
                   'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
                   'Content-Type': 'application/json'
               }
+
+              models_to_check = [
+                  {'id':'anthropic.claude-v2','name':'Claude v2','url':'https://us-east-1.console.aws.amazon.com/bedrock/home?region=us-east-1#/modelaccess'},
+                  {'id':'amazon.nova-lite-v1:0','name':'Amazon Nova Micro','url':'https://us-east-1.console.aws.amazon.com/bedrock/home?region=us-east-1#/modelaccess'},
+                  {'id':'amazon.titan-text-express-v1','name':'Amazon Titan','url':'https://us-east-1.console.aws.amazon.com/bedrock/home?region=us-east-1#/modelaccess'},
+                  {'id':'meta.llama3-1-70b-instruct-v1','name':'Meta LLama3','url':'https://us-east-1.console.aws.amazon.com/bedrock/home?region=us-east-1#/modelaccess'}
+              ]
+              
+              # Check access
+              access_results = check_bedrock_model_access(models_to_check)
 
               try:
                   download_url = "https://github.com/bfateen/genaiprototyping/archive/refs/heads/main.zip"
@@ -1531,7 +2731,7 @@ Resources:
                                               'Bucket': bucket_name,
                                               'Key': s3_key
                                           },
-                                          ExpiresIn=3600
+                                          ExpiresIn=9600
                                       )
                                       
                                       public_url = get_public_url(bucket_name, s3_key)
@@ -1575,7 +2775,7 @@ Resources:
                                               'Bucket': bucket_name,
                                               'Key': s3_key
                                           },
-                                          ExpiresIn=3600
+                                          ExpiresIn=9600
                                       )
                                       
                                       obj['iconurl'] = purl
@@ -1610,7 +2810,8 @@ Resources:
                           'appinfo': maininfo,
                           'prototypes': protos,
                           'file_count': len(processed_files),
-                          'files': processed_files
+                          'files': processed_files,
+                          'models_access':access_results
                       })
                   }
                   
@@ -1702,10 +2903,6 @@ Outputs:
   AdminUsername:
     Description: Admin username (email)
     Value: !Ref AdminEmail
-
-  UserPoolId:
-    Description: Cognito User Pool ID
-    Value: !Ref UserPool
 
   Instructions:
     Description: Instructions to access the protected content
