@@ -12,7 +12,7 @@ The environment is setup with the following these steps: 1/ User watches a short
 ### Main Features:
 1.	Dynamic loading of custom-built prototypes from a GitHub repository
 2.	One-click prototype deployment system for Generative AI applications
-3.	Web-based interface hosted on S3 with a modern, responsive design
+3.	Choose from several Bedrock LLMs including Amazon Nova, Anthropic Claude, etc.
 4.	Real-time deployment status monitoring, progress tracking and removal with cleanup
 5.	Auto-deleting prototypes with all resources (2 hour default) to prevent unwanted consts
 6.	Direct links to AWS console for deployed services (S3, Lambda, API Gateway)
