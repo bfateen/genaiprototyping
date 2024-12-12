@@ -38,6 +38,19 @@ The following initial custom prototypes for idea validation and MVPs will be inc
 - **Real-time Status Updates**: Monitor deployment progress through the web interface
 - **Resource Management**: Automatic cleanup and proper resource handling
 
+## 🎯 Installation
+
+1. Download 'leap-installer-setup.yaml'
+2. Log into your AWS console and navigate to CloudFormation
+3. Click 'Create Stack' -> 'With new resources' -> 'Upload a template file' and select 'leap-installer-setup.yaml'
+4. Continue and submit
+5. When stack has completed (about 30 seconds) click 'Outputs' for login instructions
+
+<img width="1409" alt="Screenshot 2024-12-12 at 11 08 36 PM" src="https://github.com/user-attachments/assets/38b8fe81-0c4a-432e-a096-80a730fa7c1d" />
+
+<img width="1382" alt="Screenshot 2024-12-12 at 11 08 47 PM" src="https://github.com/user-attachments/assets/db8a73a4-0390-4454-ac52-eb4bd3eb6d89" />
+
+   
 ## 🏗️ Architecture Overview
 
 ### Environment Installer Stats
