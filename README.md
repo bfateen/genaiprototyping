@@ -20,8 +20,9 @@ The environment is setup with the following these steps: 1/ User watches a short
 8.	Integrated explainer system with video tutorials and documentation
 9.	Persistent state management using local storage
 10.	CORS-enabled API endpoints for secure cross-origin requests
-    
-<img width="1469" alt="Screenshot 2024-10-31 at 8 44 46 AM" src="https://github.com/user-attachments/assets/095f5477-c536-45ba-ac20-d337d3eb1364">
+
+<img width="1461" alt="Screenshot 2024-12-12 at 11 52 26 PM" src="https://github.com/user-attachments/assets/4abe2672-37fb-4280-a980-037b3b933d12" />
+
 
 The following initial custom prototypes for idea validation and MVPs will be included in the first version (to be released following AppSec review on November 15th)
 - A full-stack serverless Generative AI chatbot app with a Rest API endpoint
