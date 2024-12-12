@@ -14,7 +14,7 @@ The environment is setup with the following these steps: 1/ User watches a short
 2.	One-click prototype deployment system for Generative AI applications
 3.	Choose from several Bedrock LLMs including Amazon Nova, Anthropic Claude, etc.
 4.	Real-time deployment status monitoring, progress tracking and removal with cleanup
-5.	Auto-deleting prototypes with all resources (2 hour default) to prevent unwanted consts
+5.	Auto-deleting prototypes with all resources (2 hour default) to prevent unexpected charges
 6.	Direct links to AWS console for deployed services (S3, Lambda, API Gateway)
 7.	Interactive architecture visualization for deployed prototypes
 8.	Integrated explainer system with video tutorials and documentation
