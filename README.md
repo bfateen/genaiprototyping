@@ -3,7 +3,7 @@
 LEAP is a web-based, open-source environment that allows pre-built prototypes to be launched instantly and modified within only 7 steps. It is designed for seamless integration with existing AWS accounts, requiring no modifications to the current AWS user interface. 
 
 This solution  enables rapid deployment of full-stack AWS prototypes through a secure web interface. The system consists of two main components:
-1. A secure prototype environment installer
+1. A script to install the web app into your AWS account
 2. Deployable prototype templates
 
 The environment is setup with the following these steps: 1/ User watches a short video that describes the simple setup process and basic info on CloudFormation and Amazon Bedrock model access, 2/ User requests and is granted access to an AI Model, 3/ User uploads the setup CloudFormation script which installs the web app and sets up all the necessary roles and permissions, 4/ User clicks on the URL for the web app to open it in their browser and chooses from pre-loaded prototypes, 5/ The CloudFormation stack is deployed on the backend and returns the new resources, 6/ Links to the assets are shown clearly to the user (frontend URL, API endpoint, link to Lambda function, etc.), 7/ A brief description about the generated resources and how they interact along with clickable links to 30 second videos that explain concepts (i.e. Prompt Engineering) and services (i.e. API Gateway) which creates a personalized learning path on the right side column.
