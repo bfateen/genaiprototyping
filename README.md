@@ -14,9 +14,9 @@ The environment is setup with the following these steps: 1/ User watches a short
 2.	One-click prototype deployment system for Generative AI applications
 3.	Web-based interface hosted on S3 with a modern, responsive design
 4.	Real-time deployment status monitoring, progress tracking and removal with cleanup
-5.	Interactive architecture visualization for deployed prototypes
+5.	Auto-deleting prototypes with all resources (2 hour default) to prevent unwanted consts
 6.	Direct links to AWS console for deployed services (S3, Lambda, API Gateway)
-7.	Cost tracking and estimation for deployed prototypes
+7.	Interactive architecture visualization for deployed prototypes
 8.	Integrated explainer system with video tutorials and documentation
 9.	Persistent state management using local storage
 10.	CORS-enabled API endpoints for secure cross-origin requests
