@@ -30,15 +30,25 @@ The following initial custom prototypes for idea validation and MVPs will be inc
 - A‘wizard of oz’ prototype that analyzes uploaded documents with Gen AI using an Agent on Bedrock and returns an analysis. The second version of the environment includes the ability to customize the frontend using natural language for more flexibility in generating customized frontends plus the ability to continue development locally using SAM and AWS CDK.
 
 
-## 🎯 Features
+## 🚀 Quick Start
 
-- **Secure Web Interface**: Protected by Cognito authentication
-- **Dynamic Prototype Loading**: Automatically loads prototypes from a GitHub repository
-- **One-Click Deployment**: Deploy complex AWS architectures with a single click
-- **Real-time Status Updates**: Monitor deployment progress through the web interface
-- **Resource Management**: Automatic cleanup and proper resource handling
+1. Clone this repository
+2. Deploy the environment installer:
+```bash
+aws cloudformation create-stack \
+  --stack-name prototype-env \
+  --template-body file://leap-installer-sec.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters \
+    ParameterKey=AdminEmail,ParameterValue=admin@example.com \
+    ParameterKey=InitialPassword,ParameterValue=Initial123!
+```
 
-## 🎯 Installation
+3. Access the web interface using the URL from stack outputs
+4. Login with provided admin credentials
+5. Select and deploy prototypes
+   
+## 🎯 Manual Installation
 
 1. Download 'leap-installer-setup.yaml'
 2. Log into your AWS console and navigate to CloudFormation
@@ -94,24 +104,6 @@ To validate the security posture of prototypes created through this solution, we
 
 While we streamline security configurations to enable rapid experimentation, we maintain vigilance over fundamental security controls. Each prototype environment ensures proper implementation of basic security features such as client-side encryption and appropriate logging configurations. These foundational security measures are non-negotiable even in prototype environments, establishing good security practices from the start.
 
-
-## 🚀 Quick Start
-
-1. Clone this repository
-2. Deploy the environment installer:
-```bash
-aws cloudformation create-stack \
-  --stack-name prototype-env \
-  --template-body file://leap-installer-sec.yaml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameters \
-    ParameterKey=AdminEmail,ParameterValue=admin@example.com \
-    ParameterKey=InitialPassword,ParameterValue=Initial123!
-```
-
-3. Access the web interface using the URL from stack outputs
-4. Login with provided admin credentials
-5. Select and deploy prototypes
 
 ## 🔧 Technical Details
 
