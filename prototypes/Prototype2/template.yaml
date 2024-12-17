@@ -197,7 +197,7 @@ Resources:
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
-      Domain: !Sub ${AWS::StackName}-${AWS::Region}-${AWS::AccountId}-auth
+      Domain: !Sub ${AWS::Region}-${AWS::AccountId}-kbauth
       UserPoolId: !Ref UserPool
 
   UserPoolClient:
