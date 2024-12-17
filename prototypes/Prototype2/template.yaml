@@ -2119,10 +2119,10 @@ Resources:
       Runtime: python3.8
       Timeout: 30
 
-  DeleteStackFunction:
+  DeleteStackFunction2:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: DeleteStackFunction
+      FunctionName: DeleteStackFunction2
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
@@ -2200,7 +2200,7 @@ Resources:
               sfn = boto3.client('stepfunctions')
               iam = boto3.client('iam')
 
-              DELETE_STACK_FUNCTION_ARN = '${DeleteStackFunction.Arn}'
+              DELETE_STACK_FUNCTION_ARN = '${DeleteStackFunction2.Arn}'
 
 
               body = json.loads(event['body'])
@@ -2446,7 +2446,7 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeleteStackFunction.Arn}/invocations'
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeleteStackFunction2.Arn}/invocations'
 
   DeleteStackOptionsMethod:
     Type: 'AWS::ApiGateway::Method'
@@ -2562,7 +2562,7 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !GetAtt DeleteStackFunction.Arn
+      FunctionName: !GetAtt DeleteStackFunction2.Arn
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*'
 
