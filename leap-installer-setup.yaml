@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'AWS LEAP environment installer'
+Description: 'Secure static website using Cognito Hosted UI'
 
 Parameters:
   AdminEmail:
@@ -309,6 +309,7 @@ Resources:
                   - 'lambda:*'
                   - 'secretsmanager:*'
                   - 'aoss:*'
+                  - 'cognito-idp:*'
                   - 'states:CreateStateMachine'
                   - 'states:StartExecution'
                 Resource: '*'
@@ -1511,6 +1512,7 @@ Resources:
                     const cardContent = card.find('.card-content');
 
                     prototypes[index]['active']=false;
+                    deleting=false;
                     prototypes[index]['deletetimer']=null;
                     prototypes[index]['stackname'] = "";
                     fulldata['prototypes'] = prototypes;
@@ -1964,8 +1966,8 @@ Resources:
                   template_key = body.get('templateKey')
                   template_bucket = body.get('templateBucket')
                   replacements = body.get('replacements', [])
-
-                  if len(replacements):
+                  #len(replacements)
+                  if False:
                       template_body=''
                       # Read content from S3
                       try:
@@ -2903,6 +2905,10 @@ Outputs:
   AdminUsername:
     Description: Admin username (email)
     Value: !Ref AdminEmail
+
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
 
   Instructions:
     Description: Instructions to access the protected content
