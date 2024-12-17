@@ -1,12 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'CloudFormation template for Bedrock Chat application with Lambda, API Gateway, and S3 static website'
 
-Parameters:
-  BucketName:
-    Type: String
-    Description: Name for the S3 bucket to host the static website
-    Default: bedrock-chat-frontend3
-
 Resources:
   
 
@@ -219,8 +213,8 @@ Resources:
                   - s3:GetObjectVersion
                   - s3:ListBucketVersions
                 Resource: 
-                  - !Sub 'arn:aws:s3:::${BucketName}'
-                  - !Sub 'arn:aws:s3:::${BucketName}/*'
+                  - !Sub 'arn:aws:s3:::${PrivateS3Bucket}'
+                  - !Sub 'arn:aws:s3:::${PrivateS3Bucket}/*'
 
   S3CleanupFunction:
     Type: AWS::Lambda::Function
@@ -331,7 +325,18 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      BucketName: !Ref BucketName
+      BucketName: !Join
+      - "-"
+      - - "bedrock-chat"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -349,7 +354,7 @@ Resources:
     DependsOn: PrivateS3Bucket
     Properties:
       ServiceToken: !GetAtt S3CleanupFunction.Arn
-      BucketName: !Ref BucketName
+      BucketName: !Ref PrivateS3Bucket
 
   BucketPolicy:
     Type: 'AWS::S3::BucketPolicy'
@@ -587,11 +592,11 @@ Outputs:
 
   S3BucketName:
     Description: 'Name of the created S3 bucket'
-    Value: !Ref BucketName
+    Value: !Ref PrivateS3Bucket
 
   S3BucketLink:
     Description: 'Link to the created S3 bucket'
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${BucketName}
+    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${PrivateS3Bucket}
 
   FrontendURL:
     Description: URL for the S3 static website
