@@ -245,9 +245,17 @@ Resources:
     Type: 'AWS::OpenSearchServerless::SecurityPolicy'
     Properties:
       Name: !Join
-        - '-'
-        - - !Ref AOSSCollectionName
-          - net-policy3
+      - "-"
+      - - "net-pol"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
       Type: network
       Description: Network policy for the AOSS collection
       Policy: !Sub >-
@@ -256,10 +264,18 @@ Resources:
   EncryptionPolicy:
     Type: 'AWS::OpenSearchServerless::SecurityPolicy'
     Properties:
-      Name: !Join
-        - '-'
-        - - !Ref AOSSCollectionName
-          - security-policy3
+      Name:  !Join
+      - "-"
+      - - "sec-pol"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
       Type: encryption
       Description: Encryption policy for the AOSS collection
       Policy: !Sub >-
@@ -268,7 +284,18 @@ Resources:
   DataAccessPolicy:
     Type: 'AWS::OpenSearchServerless::AccessPolicy'
     Properties:
-      Name: 'instantagent-access-policy3'
+      Name: !Join
+      - "-"
+      - - "acc-pol"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
       Type: data
       Description: Access policy for the AOSS collection
       Policy: !Sub >-
