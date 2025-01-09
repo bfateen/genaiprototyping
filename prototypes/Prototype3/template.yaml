@@ -1340,7 +1340,18 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      BucketName: !Sub '${AWS::StackName}-artifacts'
+      BucketName: !Join
+      - "-"
+      - - "artifacts"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
 
   ArtifactsBucketCleanupResource:
     Type: Custom::S3Cleanup
@@ -1356,7 +1367,18 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      BucketName: !Sub '${AWS::StackName}-screenshots'
+      BucketName: !Join
+      - "-"
+      - - "screenshots"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
 
   ScreenshotBucketCleanupResource:
     Type: Custom::S3Cleanup
