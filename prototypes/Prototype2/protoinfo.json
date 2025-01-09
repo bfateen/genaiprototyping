@@ -1,8 +1,8 @@
 {
-    "title": "Chat with your documents with Knowledge Base",
+    "title": "Chat with your documents",
     "description": "A full-stack RAG application that enables intelligent document interactions.",
     "fulldescription": "A full-stack application that enables intelligent document interactions using Amazon Bedrock's Knowledge Base and Agent capabilities. This prototype demonstrates Retrieval-Augmented Generation (RAG) on Amazon Bedrock for building AI-powered document question-answering systems.",
-    "icon": "icon2.png",
+    "icon": "leapai_docs.png",
     "videoUrl": "https://example.com/video1",
     "services": [
         {
