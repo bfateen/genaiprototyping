@@ -30,7 +30,18 @@ Resources:
   ChatFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: bedrock-chat-function
+      FunctionName: !Join
+      - "-"
+      - - "bedrock-chat-func"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
       Handler: index.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
