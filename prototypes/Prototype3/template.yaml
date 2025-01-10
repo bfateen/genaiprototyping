@@ -54,7 +54,18 @@ Resources:
         Variables:
           SNS_TOPIC_NAME: !Sub '${AWS::StackName}-notifications'
           DYNAMODB_TABLE_NAME: !Sub '${AWS::StackName}-results'
-      FunctionName: bedrock-chat-function
+      FunctionName: !Join
+      - "-"
+      - - "bedrock-chat"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
       Handler: index.lambda_handler
       Role: !GetAtt LambdaExecutionRole1.Arn
       Code:
