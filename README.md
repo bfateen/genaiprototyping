@@ -21,33 +21,15 @@ The environment is setup with the following these steps: 1/ User watches a short
 9.	Persistent state management using local storage
 10.	CORS-enabled API endpoints for secure cross-origin requests
 
-<img width="1461" alt="Screenshot 2024-12-12 at 11 52 26 PM" src="https://github.com/user-attachments/assets/4abe2672-37fb-4280-a980-037b3b933d12" />
+<img width="1450" alt="leap_screenshot1" src="https://github.com/user-attachments/assets/4c249116-7e60-42d5-8c70-0d471bfe3f95" />
 
+<img width="987" alt="leap_screenshot2" src="https://github.com/user-attachments/assets/de6239b7-2a98-46e1-a068-353d59dee3af" />
 
 The following initial custom prototypes for idea validation and MVPs will be included in the first version (to be released following AppSec review on November 15th)
 - A full-stack serverless Generative AI chatbot app with a Rest API endpoint
 - A ‘chat with your documents’ Knowledge Base web app using Cognito to secure endpoints
-- A landing page that collects signups for preview access with a Gen AI prompt-flow backend plus basic analytics
-- A‘wizard of oz’ prototype that analyzes uploaded documents with Gen AI using an Agent on Bedrock and returns an analysis. The second version of the environment includes the ability to customize the frontend using natural language for more flexibility in generating customized frontends plus the ability to continue development locally using SAM and AWS CDK.
+- A 'chat with a web site' application that uses a headless browser to take snapshots of a website and use the multimodal features of Amazon nova to analyze the image and answer questions and monitor for changes
 
-
-## 🚀 Quick Start
-
-1. Clone this repository
-2. Deploy the environment installer:
-```bash
-aws cloudformation create-stack \
-  --stack-name prototype-env \
-  --template-body file://leap-installer-sec.yaml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameters \
-    ParameterKey=AdminEmail,ParameterValue=admin@example.com \
-    ParameterKey=InitialPassword,ParameterValue=Initial123!
-```
-
-3. Access the web interface using the URL from stack outputs
-4. Login with provided admin credentials
-5. Select and deploy prototypes
    
 ## 🎯 Manual Installation
 
@@ -61,6 +43,27 @@ aws cloudformation create-stack \
 
 <img width="1382" alt="Screenshot 2024-12-12 at 11 08 47 PM" src="https://github.com/user-attachments/assets/db8a73a4-0390-4454-ac52-eb4bd3eb6d89" />
 
+
+## 🚀 Quick Start
+
+1. Clone this repository
+2. Upload the template to an S3 bucket (due to file size) and deploy the environment installer:
+```bash
+
+TEMPLATE_URL=$(BUCKET="leap-installer-$(date +%s)" && aws s3 mb s3://$BUCKET && aws s3 cp leap-installer-setup.yaml s3://$BUCKET/ && echo "https://$BUCKET.s3.amazonaws.com/leap-installer-setup.yaml")
+
+aws cloudformation create-stack \
+  --stack-name prototype-env \
+  --template-url $TEMPLATE_URL \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters \
+    ParameterKey=AdminEmail,ParameterValue=admin@example.com \
+    ParameterKey=InitialPassword,ParameterValue=Initial123!
+```
+
+3. Access the web interface using the URL from stack outputs
+4. Login with provided admin credentials
+5. Select and deploy prototypes
    
 ## 🏗️ Architecture Overview
 
