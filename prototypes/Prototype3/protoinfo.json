@@ -1,8 +1,8 @@
 {
-    "title": "Chat with your documents",
-    "description": "A full-stack RAG application that enables intelligent document interactions.",
+    "title": "Chat with a website",
+    "description": "A multi-modal application that can view and monitor websites for changes.",
     "fulldescription": "A full-stack application that enables intelligent document interactions using Amazon Bedrock's Knowledge Base and Agent capabilities. This prototype demonstrates Retrieval-Augmented Generation (RAG) on Amazon Bedrock for building AI-powered document question-answering systems.",
-    "icon": "leapai_docs.png",
+    "icon": "leapai_web.png",
     "videoUrl": "https://example.com/video1",
     "services": [
         {
@@ -20,18 +20,13 @@
             "desc": ""
         }
     ],
-    "estimatedCost": "Setup time: 7 minutes",
+    "estimatedCost": "Setup time: 2 minutes",
+    "estimatedSetupTime": 120,
     "templates": [
         {
             "name":"template.yaml",
             "inputs":[],
             "outputs": []
         }
-    ],
-          "custom_outputs": [
-        {
-            "id":"S3BucketLink",
-            "title":"Put your files here"
-        }
-          ]
+    ]
 }

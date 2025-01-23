@@ -9,10 +9,10 @@ Parameters:
   
   InitialPassword:
     Type: String
-    Description: Initial password for the admin user (must meet Cognito requirements)
-    Default: Initial123!
+    Description: Password for the admin user (8+ chars, uppercase & lowercase letters, numbers, special chars)
+    MinLength: 8
     NoEcho: true
-    
+    AllowedPattern: "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[!@#$%^&*])[a-zA-Z\\d!@#$%^&*]{8,}$"
   
 
 Resources:
@@ -507,7 +507,7 @@ Resources:
                     background-color: var(--primary-bg);
                     color: var(--primary-text);
                     line-height: 1.6;
-                    padding: var(--spacing);
+                    /*padding: var(--spacing);*/
                 }
 
                 .container {
@@ -532,6 +532,10 @@ Resources:
                     margin-bottom: var(--spacing);
                     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                     transition: transform 0.2s, box-shadow 0.2s;
+                }
+
+                .prototype-card {
+                    /*cursor: pointer;*/
                 }
 
                 .prototype-card:hover {
@@ -708,7 +712,7 @@ Resources:
                 }
 
                 .prototype-card.expanded {
-                    min-height: 300px;
+                    /*min-height: 300px;*/
                 }
 
                 .prototype-card h3{
@@ -864,7 +868,86 @@ Resources:
         <div class="top-nav">
             <div class="nav-container">
                 <a href="#" class="logo"><img src="https://www.pikpng.com/pngl/b/524-5240809_aws-logo-svg-white-clipart.png" style="width:auto;height:25px;position:relative;top:5px;margin-right:10px;">LEAP - Instant Prototypes</a>
-                   <div><a id="editmodels" href="#" style="color:white;text-decoration:none;margin-right:15px;">Loading...</a><a href="https://aws.amazon.com/startups/credits" target="_blank" class="signup-btn">Apply for Activate credits</a></div>
+                   <div>
+                    <div class="toggle-container" style="width:100px;display:inline-block;color:white;">
+                      <label class="switch">
+                          <input type="checkbox" onchange="handleToggle(this)" checked>
+                          <span class="slider round"></span>
+                          Autodestroy
+                      </label>
+                  </div>
+                  
+                  <style>
+                      .switch {
+                          position: relative;
+                          display: inline-block;
+                          width: 60px;
+                          height: 34px;
+                      }
+                  
+                      .switch input {
+                          opacity: 0;
+                          width: 0;
+                          height: 0;
+                      }
+                  
+                      .slider {
+                          position: absolute;
+                          cursor: pointer;
+                          top: 0;
+                          left: 0;
+                          right: 0;
+                          bottom: 0;
+                          background-color: #ccc;
+                          transition: .4s;
+                      }
+                  
+                      .slider:before {
+                          position: absolute;
+                          content: "";
+                          height: 26px;
+                          width: 26px;
+                          left: 4px;
+                          bottom: 4px;
+                          background-color: white;
+                          transition: .4s;
+                      }
+                  
+                      input:checked+.slider {
+                          background-color: #0066cc;
+                      }
+                  
+                      input:checked+.slider:before {
+                          transform: translateX(26px);
+                      }
+                  
+                      .slider.round {
+                          border-radius: 34px;
+                      }
+                  
+                      .slider.round:before {
+                          border-radius: 50%;
+                      }
+                  </style>
+                  
+                  <script>
+                      var autodestroy=true;
+
+                      function handleToggle(checkbox) {
+                          
+                          autodestroy= checkbox.checked;
+
+                          if (checkbox.checked) {
+                              console.log('Toggle is ON');
+                              
+                              // Add your ON state logic here
+                          } else {
+                              console.log('Toggle is OFF');
+                              // Add your OFF state logic here
+                          }
+                      }
+                  </script>     
+                   <a id="editmodels" href="#" style="color:white;text-decoration:none;margin-right:15px;">Loading...</a><a href="https://aws.amazon.com/startups/credits" target="_blank" class="signup-btn">Apply for Activate credits</a></div>
             </div>
         </div>   
 
@@ -1148,6 +1231,7 @@ Resources:
 
                         const card = $(
                             '<div class="card prototype-card" data-id="' + prototype.id + '" data-stackname="' + prototype.stackname + '">' +
+                            '<div class="status-msg"></div>' + 
                             '<div class="card-content"><div style="float:right">'+modstr+'<a href="#" data-id="' + prototype.id + '" class="launchbut" style="">Launch</a></div>' +
                             '<div class="card-header">' +
                             '<img src="' + prototype.iconurl + '" alt="' + prototype.title + ' icon" class="card-icon">' +
@@ -1226,7 +1310,7 @@ Resources:
                         }   
 
                         if (!hasaccess)
-                          showModal("Bedrock Models", "You need to have access to at least one model to continue.", models_access);
+                          showModal("Model Access", "You need to have access to at least one model to continue.", models_access);
 
                         $('#editmodels').html(tote+' models enabled');
 
@@ -1350,6 +1434,10 @@ Resources:
                 }      
 
                 async function deleteStack(stackName,id) {
+                          
+                     $('.prototype-card[data-id="' + id + '"]').find('.status-msg').html('Deleting...');
+                    $('.prototype-card[data-id="' + id + '"]').find('.deployment-info').hide();
+
                     const output = document.getElementById('output');
                 const apiUrl = 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/delete-stack';
 
@@ -1424,15 +1512,20 @@ Resources:
                                           }
                                       }
 
+                                      $('.prototype-card[data-id="' + pid + '"]').find('.status-msg').html('');
                                       PrototypeDeployed(pid, pindex);
                                       saveToLocalStorage('myAppState', fulldata);
 
+                                      if (autodestroy)
+                                      {
                                       selfdestructStack(stackName,pid);
                                       startCountdownTimer(pid);
+                                      }
 
                                     }
                                     else
                                     {
+                                      $('.prototype-card[data-id="' + pid + '"]').find('.status-msg').html('');
                                        PrototypeDeleted(pid, pindex);
                                        saveToLocalStorage('myAppState', fulldata);
                                     }
@@ -1461,6 +1554,7 @@ Resources:
 
                            console.log('deleted');
                            PrototypeDeleted(pid, pindex);
+                           $('.prototype-card[data-id="' + pid + '"]').find('.status-msg').html('');
                            saveToLocalStorage('myAppState', fulldata);
                         }
                     }
@@ -1582,11 +1676,15 @@ Resources:
                       }
                 }
 
+                function getRandomFloat(min, max) {
+                    return Math.random() * (max - min) + min;
+                }     
                 const getRandomNumber = (min, max) => {
                     return Math.floor(Math.random() * (max - min + 1)) + min;
                 }
 
                 function deployPrototype(id) {
+                $('.prototype-card[data-id="' + id + '"]').find('.status-msg').html('Loading...');
             const card = $(".prototype-card[data-id='"+id+"']");
             const cardContent = card.find('.card-content');
             const progressBar = card.find('.progress-bar');
@@ -1602,15 +1700,26 @@ Resources:
             // Hide card content, show progress bar
             cardContent.fadeOut();
             progressBar.fadeIn();
+
+              var pindex = 0;
+
+              for (var i = 0; i < prototypes.length; i++)
+                  if (prototypes[i]['id'] == id) {
+                      pindex = i;
+                      break;
+                  }
             
             // Simulate deployment progress
             let progress = 0;
+            let totsecs = prototypes[pindex]['estimatedSetupTime'] ? prototypes[pindex]['estimatedSetupTime']: 200;
+            let tick = totsecs/200;
+
             const interval = setInterval(() => {
 
-                if (progress<65)
-                  progress += getRandomNumber(1,5);              
-                   else
-                  progress += getRandomNumber(1,3);                 
+                 if (progress < 85)
+                    progress=progress+getRandomFloat(tick,tick*2);
+                else
+                    progress = progress + tick;                
 
                 if (progress >= 100) {
                     progress = 100;
@@ -1661,6 +1770,8 @@ Resources:
                 prototypes = loadedDict['prototypes'];
                 appinfo = loadedDict["appinfo"];
 
+                models_access = loadedDict["models_access"];
+
                 renderPrototypes();
 
                 var pindex=0;
@@ -1681,6 +1792,21 @@ Resources:
                     }
                     pindex++;
                 });
+
+
+                var tote = 0;
+
+                for (const model of models_access) {
+                    if (model.enabled) {
+                        tote = tote + 1;
+                        hasaccess = true;
+                    }
+                }
+
+                if (!hasaccess)
+                    showModal("Model Access", "You need to have access to at least one model to continue.", models_access);
+
+                $('#editmodels').html(tote + ' models enabled');
 
 
 
@@ -1732,7 +1858,7 @@ Resources:
                     $(document).on('click', '#editmodels', function(e) {
                       e.preventDefault();
 
-                      showModal("Bedrock Models", "You need to have access to at least one model to continue.", fulldata["models_access"]);
+                      showModal("Model Access", "You need to have access to at least one model to continue.", fulldata["models_access"]);
 
 
                     });
@@ -1997,7 +2123,12 @@ Resources:
                                   
                                   result = new_result
                           
-                          template_body=result
+                          #template_body=result
+                          s3.put_object(
+                              Bucket=template_bucket,
+                              Key=template_key,
+                              Body=result.encode('utf-8')
+                          )
 
                           
                       except Exception as e:
@@ -2007,9 +2138,13 @@ Resources:
                               'body': f"error: {e}"
                           }
                           
+                      #stack_params = {
+                      #    'TemplateBody': template_body
+                      #}
                       stack_params = {
-                          'TemplateBody': template_body
+                          'TemplateURL': f'https://{template_bucket}.s3.amazonaws.com/{template_key}'
                       }
+
                   elif template_key and template_bucket:
                       stack_params = {
                           'TemplateURL': f'https://{template_bucket}.s3.amazonaws.com/{template_key}'
@@ -2902,16 +3037,12 @@ Outputs:
     Description: Admin username (email)
     Value: !Ref AdminEmail
 
-  UserPoolId:
-    Description: Cognito User Pool ID
-    Value: !Ref UserPool
-
   Instructions:
     Description: Instructions to access the protected content
     Value: !Sub |
       1. Open the login URL provided above
-      2. You will be redirected to the Cognito hosted UI
+      2. You will be redirected to the secure login page
       3. Login with:
          Username: ${AdminEmail}
-         Password: ${InitialPassword}
-      4. After successful login, you'll be automatically redirected to the protected content
+         Use the password that you set earlier
+      4. After successful login, you'll be automatically redirected to your secure LEAP page

@@ -145,9 +145,19 @@ Resources:
     Description: Creates an Amazon S3 bucket to hold source data for the knowledge base.
     Properties:
       BucketName: !Join
-        - '-'
-        - - !Ref AOSSCollectionName
-          - !Sub ${AWS::AccountId}
+      - "-"
+      - - "leapkb"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
+
+       
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -164,9 +174,17 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Join
-        - '-'
-        - - AmazonBedrockExecutionRoleForKnowledgeBase
-          - !Ref AOSSCollectionName
+      - "-"
+      - - "kbexec-role"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
       AssumeRolePolicyDocument:
         Statement:
           - Effect: Allow
@@ -245,9 +263,17 @@ Resources:
     Type: 'AWS::OpenSearchServerless::SecurityPolicy'
     Properties:
       Name: !Join
-        - '-'
-        - - !Ref AOSSCollectionName
-          - net-policy3
+      - "-"
+      - - "net-pol"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
       Type: network
       Description: Network policy for the AOSS collection
       Policy: !Sub >-
@@ -257,9 +283,17 @@ Resources:
     Type: 'AWS::OpenSearchServerless::SecurityPolicy'
     Properties:
       Name: !Join
-        - '-'
-        - - !Ref AOSSCollectionName
-          - security-policy3
+      - "-"
+      - - "enc-pol"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
       Type: encryption
       Description: Encryption policy for the AOSS collection
       Policy: !Sub >-
@@ -268,7 +302,7 @@ Resources:
   DataAccessPolicy:
     Type: 'AWS::OpenSearchServerless::AccessPolicy'
     Properties:
-      Name: 'instantagent-access-policy3'
+      Name: "accpol545"
       Type: data
       Description: Access policy for the AOSS collection
       Policy: !Sub >-
@@ -305,6 +339,8 @@ Resources:
           
           logger = logging.getLogger()
           logger.setLevel(logging.INFO)
+
+          
 
           def install_and_import_dependencies():
               subprocess.check_call([sys.executable, "-m", "pip", "install", "--target", "/tmp", "requests", "requests_aws4auth"])
@@ -464,6 +500,16 @@ Resources:
           import string
           import base64
 
+          def clean_policy_name(policy_name):
+              """Clean the policy name to ensure it matches AWS requirements."""
+              # Remove any pipe characters and their prefixes
+              cleaned_name = policy_name.split('|')[-1] if '|' in policy_name else policy_name
+              # Ensure the name starts with a letter and only contains allowed characters
+              cleaned_name = ''.join(c for c in cleaned_name if c.isalnum() or c == '-')
+              if not cleaned_name[0].isalpha():
+                  cleaned_name = 'p-' + cleaned_name
+              return cleaned_name.lower()
+
           def generate_policy_version():
               timestamp = int(time.time())
               random_string = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
@@ -477,7 +523,8 @@ Resources:
                   print(f"Received event: {json.dumps(event)}")
                   
                   if event['RequestType'] in ['Create', 'Update']:
-                      policy_name = 'instantagent-access-policy3'
+                      policy_name = event['ResourceProperties']['PolicyName']
+                      policy_name = clean_policy_name(policy_name)
                       collection_name = event['ResourceProperties']['CollectionName']
                       iam_role_arn = event['ResourceProperties']['IAMRoleArn']
                       kb_role_arn = event['ResourceProperties']['KBRoleArn']
@@ -579,7 +626,18 @@ Resources:
       - Collection
       - VectorIndexUpdate
     Properties:
-      Name: !Ref KnowledgeBaseName
+      Name: !Join
+      - "-"
+      - - "leapkb"
+        - !Select
+          - 0
+          - !Split
+            - "-"
+            - !Select
+              - 2
+              - !Split
+                - "/"
+                - !Ref "AWS::StackId"
       Description: !Ref KnowledgeBaseDescription
       RoleArn: !GetAtt AmazonBedrockExecutionRoleForKnowledgeBase.Arn
       KnowledgeBaseConfiguration:
