@@ -21,7 +21,7 @@
         }
     ],
     "estimatedCost": "Setup time: 1 minute",
-    "estimatedSetupTime":10,
+    "estimatedSetupTime":100,
     "templates": [
         {
             "name":"template.yaml",
