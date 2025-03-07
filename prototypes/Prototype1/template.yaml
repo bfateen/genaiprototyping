@@ -1,8 +1,38 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'CloudFormation template for Bedrock Chat application with Lambda, API Gateway, and S3 static website'
+Description: 'CloudFormation template for Bedrock Chat application with Lambda, API Gateway, DynamoDB, and S3 static website'
 
 Resources:
-  
+  # DynamoDB Table for Chat Logs
+  ChatLogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Join
+        - "-"
+        - - "bedrock-chat-logs"
+          - !Select
+            - 0
+            - !Split
+              - "-"
+              - !Select
+                - 2
+                - !Split
+                  - "/"
+                  - !Ref "AWS::StackId"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
 
   # Lambda Function for Chat
   LambdaExecutionRole:
@@ -26,6 +56,16 @@ Resources:
                 Action:
                   - bedrock:*
                 Resource: '*'
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !GetAtt ChatLogTable.Arn
 
   ChatFunction:
     Type: AWS::Lambda::Function
@@ -48,29 +88,56 @@ Resources:
         ZipFile: |
           import json
           import boto3
+          import time
+          import uuid
+          from datetime import datetime
 
           def lambda_handler(event, context):
+              model_id = "amazon.titan-text-premier-v1:0"
+              
               try:
+                  # Start timing the request
+                  start_time = time.time()
+                  request_id = str(uuid.uuid4())
+                  timestamp = int(datetime.now().timestamp() * 1000)  # Milliseconds since epoch
+                  
                   # Parse the incoming message from the request body
                   body = event.get('body', '{}')
                   if isinstance(body, str):
-                    body = json.loads(body)
+                      body = json.loads(body)
                   
                   user_message = body.get('message', '')
-                  if not user_message:
-                    return {
-                        'statusCode': 400,
-                        'headers': {
-                            'Access-Control-Allow-Origin': '*',
-                            'Access-Control-Allow-Headers': 'Content-Type',
-                            'Access-Control-Allow-Methods': 'OPTIONS,POST'
-                        },
-                        'body': json.dumps({'error': 'No message provided'})
-                    }
-                    
-                  print("Loaded "+user_message)
+                  client_ip = event.get('requestContext', {}).get('identity', {}).get('sourceIp', 'unknown')
                   
-                  client = boto3.client("bedrock-runtime")
+                  if not user_message:
+                      error_response = {
+                          'statusCode': 400,
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*',
+                              'Access-Control-Allow-Headers': 'Content-Type',
+                              'Access-Control-Allow-Methods': 'OPTIONS,POST'
+                          },
+                          'body': json.dumps({'error': 'No message provided'})
+                      }
+                      
+                      # Log error to DynamoDB
+                      log_to_dynamodb(
+                          request_id=request_id,
+                          timestamp=timestamp,
+                          user_message="",
+                          bot_response="No message provided",
+                          latency=time.time() - start_time,
+                          client_ip=client_ip,
+                          status_code=400,
+                          error="No message provided"
+                      )
+                      
+                      return error_response
+                  
+                  print(f"Processing request {request_id}: {user_message}")
+                  
+                  # Call Bedrock
+                  bedrock_client = boto3.client("bedrock-runtime")
                   
                   msg = {
                       "role": "user",
@@ -79,29 +146,108 @@ Resources:
                       ]
                   }
                   
-                  response = client.converse(
-                      modelId="amazon.titan-text-premier-v1:0",
-                      messages=[msg],
-                      inferenceConfig={
-                          "maxTokens": 512,
-                          "temperature": 0
-                      },
-                  )
                   
-                  output = response["output"]["message"]
                   
-                  # Return response with CORS headers
-                  return {
-                      'statusCode': 200,
-                      'headers': {
-                          'Access-Control-Allow-Origin': '*',
-                          'Access-Control-Allow-Headers': 'Content-Type',
-                          'Access-Control-Allow-Methods': 'OPTIONS,POST'
-                      },
-                      'body': json.dumps(output)
-                  }
+                  bedrock_start_time = time.time()
+                  try:
+                      response = bedrock_client.converse(
+                          modelId=model_id,
+                          messages=[msg],
+                          inferenceConfig={
+                              "maxTokens": 512,
+                              "temperature": 0
+                          },
+                      )
+                      bedrock_latency = time.time() - bedrock_start_time
+                      
+                      output = response["output"]["message"]
+                      bot_response = output.get("content", [{}])[0].get("text", "")
+                      
+                      # Extract token usage information from the response
+                      input_tokens = response.get("usage", {}).get("inputTokens", 0)
+                      output_tokens = response.get("usage", {}).get("outputTokens", 0)
+                      total_tokens = input_tokens + output_tokens
+                      
+                      
+                      
+                      # Calculate total latency
+                      total_latency = time.time() - start_time
+                      
+                      # Log successful request to DynamoDB
+                      log_to_dynamodb(
+                          request_id=request_id,
+                          timestamp=timestamp,
+                          user_message=user_message,
+                          bot_response=bot_response,
+                          latency=total_latency,
+                          bedrock_latency=bedrock_latency,
+                          client_ip=client_ip,
+                          status_code=200,
+                          error=None,
+                          input_tokens=input_tokens,
+                          output_tokens=output_tokens,
+                          total_tokens=total_tokens,
+                          model_id=model_id
+                      )
+                      
+                      # Return response with CORS headers
+                      return {
+                          'statusCode': 200,
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*',
+                              'Access-Control-Allow-Headers': 'Content-Type',
+                              'Access-Control-Allow-Methods': 'OPTIONS,POST'
+                          },
+                          'body': json.dumps(output)
+                      }
+                      
+                  except Exception as bedrock_error:
+                      bedrock_error_str = str(bedrock_error)
+                      print(f"Bedrock API error: {bedrock_error_str}")
+                      
+                      # Log Bedrock error to DynamoDB
+                      log_to_dynamodb(
+                          request_id=request_id,
+                          timestamp=timestamp,
+                          user_message=user_message,
+                          bot_response="",
+                          latency=time.time() - start_time,
+                          client_ip=client_ip,
+                          status_code=500,
+                          model_id=model_id,
+                          error=f"Bedrock API error: {bedrock_error_str}"
+                      )
+                      
+                      return {
+                          'statusCode': 500,
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*',
+                              'Access-Control-Allow-Headers': 'Content-Type',
+                              'Access-Control-Allow-Methods': 'OPTIONS,POST'
+                          },
+                          'body': json.dumps({'error': f"Bedrock API error: {bedrock_error_str}"})
+                      }
                   
               except Exception as e:
+                  error_str = str(e)
+                  print(f"General error: {error_str}")
+                  
+                  try:
+                      # Try to log the error to DynamoDB
+                      log_to_dynamodb(
+                          request_id=request_id if 'request_id' in locals() else str(uuid.uuid4()),
+                          timestamp=timestamp if 'timestamp' in locals() else int(datetime.now().timestamp() * 1000),
+                          user_message=user_message if 'user_message' in locals() else "",
+                          bot_response="",
+                          latency=time.time() - start_time if 'start_time' in locals() else 0,
+                          client_ip=client_ip if 'client_ip' in locals() else "unknown",
+                          status_code=500,
+                          model_id=model_id,
+                          error=f"General error: {error_str}"
+                      )
+                  except Exception as log_error:
+                      print(f"Failed to log error to DynamoDB: {str(log_error)}")
+                  
                   return {
                       'statusCode': 500,
                       'headers': {
@@ -109,11 +255,79 @@ Resources:
                           'Access-Control-Allow-Headers': 'Content-Type',
                           'Access-Control-Allow-Methods': 'OPTIONS,POST'
                       },
-                      'body': json.dumps({'error': str(e)})
+                      'body': json.dumps({'error': error_str})
                   }
+
+          def log_to_dynamodb(request_id, timestamp, user_message, bot_response, latency, client_ip, status_code, error=None, bedrock_latency=None, input_tokens=None, output_tokens=None, total_tokens=None, model_id=None, model_version=None):
+              """
+              Logs chat information to DynamoDB
+              """
+              try:
+                  # Initialize DynamoDB client
+                  dynamodb = boto3.resource('dynamodb')
+                  table_name = None
+                  
+                  # Get the DynamoDB table name from environment variables
+                  import os
+                  table_name = os.environ.get('DYNAMODB_TABLE_NAME')
+                  
+                  # Use default name if environment variable not found
+                  if not table_name:
+                      # Default table name as fallback
+                      table_name = "bedrock-chat-logs"
+                      print(f"Warning: Using default table name: {table_name}")
+                  
+                  table = dynamodb.Table(table_name)
+                  
+                  # Create the item to store
+                  item = {
+                      'id': request_id,
+                      'timestamp': timestamp,
+                      'user_message': user_message[:1000] if user_message else "",  # Truncate if too long
+                      'bot_response': bot_response[:1000] if bot_response else "",  # Truncate if too long
+                      'latency_ms': int(latency * 1000),  # Convert to milliseconds
+                      'client_ip': client_ip,
+                      'status_code': status_code,
+                      'date': datetime.fromtimestamp(timestamp/1000).strftime('%Y-%m-%d'),
+                  }
+                  
+                  # Add optional fields if they exist
+                  if error:
+                      item['error'] = error[:1000]  # Truncate if too long
+                  
+                  if bedrock_latency is not None:
+                      item['bedrock_latency_ms'] = int(bedrock_latency * 1000)  # Convert to milliseconds
+                  
+                  # Add token usage information if available
+                  if input_tokens is not None:
+                      item['input_tokens'] = input_tokens
+                  
+                  if output_tokens is not None:
+                      item['output_tokens'] = output_tokens
+                      
+                  if total_tokens is not None:
+                      item['total_tokens'] = total_tokens
+                      
+                  # Add model information if available
+                  if model_id is not None:
+                      item['model_id'] = model_id
+                      
+                  if model_version is not None:
+                      item['model_version'] = model_version
+                  
+                  # Store in DynamoDB
+                  table.put_item(Item=item)
+                  print(f"Logged to DynamoDB: {request_id}")
+                  
+              except Exception as e:
+                  print(f"Error logging to DynamoDB: {str(e)}")
+                  # Don't re-raise the exception to avoid breaking the main function
       Runtime: python3.9
       Timeout: 30
       MemorySize: 128
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref ChatLogTable
 
   # API Gateway
   ChatAPI:
@@ -600,6 +814,13 @@ Resources:
       AWSReg: !Ref AWS::Region
 
 Outputs:
+  DynamoDBTableName:
+    Description: 'Name of the created DynamoDB table for chat logs'
+    Value: !Ref ChatLogTable
+    
+  DynamoDBTableArn:
+    Description: 'ARN of the created DynamoDB table'
+    Value: !GetAtt ChatLogTable.Arn
 
   S3BucketName:
     Description: 'Name of the created S3 bucket'
