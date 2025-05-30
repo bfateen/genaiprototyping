@@ -915,7 +915,7 @@ Resources:
                       
                   # If both patterns fail, print for debugging
                   print("No match found with either pattern")
-                  return None
+                  return raw_response
                   
               except Exception as e:
                   print(f"Error in extract_result_from_raw_response: {e}")
@@ -1428,7 +1428,7 @@ Resources:
                             <div id="loading">Assistant is typing...</div>
                             <div id="input-container">
                                 <input type="text" id="message-input" placeholder="Type your message...">
-                                <button onclick="sendMessage()">Send</button>
+                                <button id="send-button" onclick="sendMessage()">Send</button>
                             </div>
                             <script>
                                 const apiUrl = 'AAAAA.execute-api.RRRR.amazonaws.com/prod/chat';
