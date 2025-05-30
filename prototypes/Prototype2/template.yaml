@@ -714,7 +714,7 @@ Resources:
       AgentResourceRoleArn: !GetAtt AmazonBedrockExecutionRoleForAgentsQA5.Arn
       AutoPrepare: true
       FoundationModel: "amazon.nova-pro-v1:0"
-      Instruction: "You are an HR bot tasked with matching candidates to suitable roles based on their skill sets, experience, and qualifications."
+      Instruction: "You are a helpful assistant with a broad range of experience to help plan various tasks."
       Description: "AI Agent Bot powered by Amazon Bedrock"
       IdleSessionTTLInSeconds: 900
       MemoryConfiguration:
@@ -911,8 +911,8 @@ Resources:
                       return result
                       
                   # If both patterns fail, print for debugging
-                  print("No match found with either pattern")
-                  return None
+                  print("No match found,returning raw response")
+                  return raw_response
                   
               except Exception as e:
                   print(f"Error in extract_result_from_raw_response: {e}")
