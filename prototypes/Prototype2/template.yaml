@@ -717,7 +717,7 @@ Resources:
       AgentResourceRoleArn: !GetAtt AmazonBedrockExecutionRoleForAgentsQA5.Arn
       AutoPrepare: true
       FoundationModel: "amazon.nova-pro-v1:0"
-      Instruction: "You are an HR bot tasked with matching candidates to suitable roles based on their skill sets, experience, and qualifications."
+      Instruction: "You are a helpful assistant with a broad range of experience to help plan various tasks."
       Description: "AI Agent Bot powered by Amazon Bedrock"
       IdleSessionTTLInSeconds: 900
       MemoryConfiguration:
@@ -761,6 +761,12 @@ Resources:
                 Action:
                   - bedrock:InvokeAgent
                   - bedrock-agent-runtime:InvokeAgent
+                  - bedrock:ListFoundationModels
+                  - bedrock:InvokeModel
+                  - bedrock:StartIngestionJob
+                  - bedrock-agent:StartIngestionJob
+                  - bedrock-agent:GetIngestionJob
+                  - bedrock-agent:ListIngestionJobs
                 Resource: '*'
 
   # Lambda Function (unchanged)
@@ -769,6 +775,7 @@ Resources:
     DependsOn:
       - AgentResource
       - BedrockAgentAlias
+      - KnowledgeBaseWithAoss
     Properties:
       Handler: index.lambda_handler
       Role: !GetAtt AgentLambdaExecutionRole.Arn
@@ -777,6 +784,8 @@ Resources:
           BEDROCK_AGENT_ID: !Ref AgentResource
           BEDROCK_ALIAS_ID: !GetAtt BedrockAgentAlias.AgentAliasId
           DYNAMODB_TABLE_NAME: !Ref ChatLogTable
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseWithAoss
+          DATA_SOURCE_ID: !GetAtt SampleDataSource.DataSourceId
       Code:
         ZipFile: |
           import json
@@ -786,6 +795,70 @@ Resources:
           from botocore.exceptions import ClientError
           import uuid
           import re
+
+          def sync():
+
+              bedrock_agent = boto3.client('bedrock-agent', region_name='us-east-1')
+
+              headers = {
+                  'Access-Control-Allow-Origin': '*', 
+                  'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+                  'Access-Control-Allow-Methods': 'OPTIONS,POST'
+              }
+                        
+              try:
+                  # Default Knowledge Base and Data Source IDs from environment variables
+                  knowledge_base_id = os.environ.get('KNOWLEDGE_BASE_ID', '')
+                  data_source_id = os.environ.get('DATA_SOURCE_ID', '')
+                                    
+                  logger.info(f"Starting sync for Knowledge Base ID: {knowledge_base_id}, Data Source ID: {data_source_id}")
+                  
+                  # Start the data source sync job
+                  response = bedrock_agent.start_ingestion_job(
+                      knowledgeBaseId=knowledge_base_id,
+                      dataSourceId=data_source_id
+                  )
+                  
+                  ingestion_job_id = response['ingestionJob']['ingestionJobId']
+                  
+                  logger.info(f"Ingestion job started successfully. Job ID: {ingestion_job_id}")
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'message': 'Knowledge Base sync started successfully',
+                          'ingestionJobId': ingestion_job_id,
+                          'status': 'STARTED',
+                          'knowledgeBaseId': knowledge_base_id,
+                          'dataSourceId': data_source_id
+                      })
+                  }
+                  
+              except ClientError as e:
+                  error_message = e.response['Error']['Message']
+                  error_code = e.response['Error']['Code']
+                  logger.error(f"Error syncing Knowledge Base: {error_code} - {error_message}")
+                  
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'error': f"Failed to sync Knowledge Base: {error_code}",
+                          'message': error_message
+                      })
+                  }
+              except Exception as e:
+                  logger.error(f"Unexpected error: {str(e)}")
+                  
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'error': 'Internal server error',
+                          'message': str(e)
+                      })
+                  }
 
           # Set up logging
           logger = logging.getLogger()
@@ -927,6 +1000,18 @@ Resources:
               ALIAS_ID = os.environ['BEDROCK_ALIAS_ID']
 
               model_id = "amazon.nova-pro-v1:0"
+
+              # Parse request body if provided
+              if 'body' in event and event['body']:
+                  try:
+                      body = json.loads(event['body'])
+                      
+                      # Override with values from request body if provided
+                      if 'sync' in body and body['sync']:
+                          return sync()
+              
+                  except json.JSONDecodeError:
+                      logger.warning("Failed to parse request body as JSON")
               
                   
               user_message = parseparam(event)
@@ -1420,10 +1505,22 @@ Resources:
                                     color: #666;
                                     padding: 10px;
                                 }
+                                #notification {
+                                    position: fixed;
+                                    top: 20px;
+                                    right: 20px;
+                                    padding: 10px 20px;
+                                    border-radius: 4px;
+                                    color: white;
+                                    z-index: 1000;
+                                    opacity: 0;
+                                    transition: opacity 0.3s ease-in-out;
+                                }
                             </style>
                         </head>
                         <body>
                             <h1>Bedrock Chat</h1>
+                            <button id="sync-button" onclick="syncKnowledgeBase()">Sync Knowledge Base</button>
                             <div id="chat-container"></div>
                             <div id="loading">Assistant is typing...</div>
                             <div id="input-container">
@@ -1445,6 +1542,118 @@ Resources:
                                         sendMessage();
                                     }
                                 });
+
+                                document.addEventListener('DOMContentLoaded', function () {
+                                    checkUrlParameters();
+                                });
+
+                                // Helper function to show notifications
+                                function showNotification(message, type = 'info') {
+                                    // Create notification element if it doesn't exist
+                                    let notification = document.getElementById('notification');
+                                    if (!notification) {
+                                        notification = document.createElement('div');
+                                        notification.id = 'notification';
+                                        document.body.appendChild(notification);
+                                    }
+
+                                    // Set color based on notification type
+                                    if (type === 'success') {
+                                        notification.style.backgroundColor = '#4CAF50';
+                                    } else if (type === 'error') {
+                                        notification.style.backgroundColor = '#F44336';
+                                    } else {
+                                        notification.style.backgroundColor = '#2196F3';
+                                    }
+
+                                    // Set message and show notification
+                                    notification.textContent = message;
+                                    notification.style.opacity = '1';
+
+                                    // Hide notification after 5 seconds
+                                    setTimeout(() => {
+                                        notification.style.opacity = '0';
+                                    }, 5000);
+                                }
+
+                                // Function to check URL parameters and trigger actions
+                                function checkUrlParameters() {
+                                    const urlParams = new URLSearchParams(window.location.search);
+
+                                    // Check if sync parameter is present
+                                    if (urlParams.has('sync')) {
+                                        const syncValue = urlParams.get('sync');
+                                        if (syncValue === 'true' || syncValue === '1') {
+                                            console.log('Auto-triggering Knowledge Base sync from URL parameter');
+                                            // Trigger sync with a slight delay to ensure page is fully loaded
+                                            setTimeout(() => {
+                                                syncKnowledgeBase()
+                                                    .then(result => {
+                                                        if (result.success) {
+                                                            // If redirect parameter is present, redirect after successful sync
+                                                            if (urlParams.has('redirect')) {
+                                                                const redirectUrl = urlParams.get('redirect');
+                                                                if (redirectUrl) {
+                                                                    setTimeout(() => {
+                                                                        window.location.href = redirectUrl;
+                                                                    }, 2000); // Give time for notification to be seen
+                                                                }
+                                                            }
+                                                        }
+                                                    });
+                                            }, 1000);
+                                        }
+                                    }
+
+                                    // Check if we should display a custom message
+                                    if (urlParams.has('message')) {
+                                        const message = urlParams.get('message');
+                                        const messageType = urlParams.has('messageType') ? urlParams.get('messageType') : 'info';
+                                        if (message) {
+                                            showNotification(decodeURIComponent(message), messageType);
+                                        }
+                                    }
+                                }
+
+                              // Function to sync the Knowledge Base data source
+                                async function syncKnowledgeBase() {
+                                    // Show loading indicator
+                                    const syncButton = document.getElementById('sync-button');
+                                    const originalText = syncButton.textContent;
+                                    syncButton.disabled = true;
+                                    syncButton.textContent = 'Syncing...';
+
+                                    // API Gateway endpoint for Knowledge Base sync
+
+                                    try {
+                                        
+                                        const response = await fetch('https://' +apiUrl, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json'
+                                            },
+                                            body: JSON.stringify({sync:true})
+                                        });
+
+                                        const data = await response.json();
+
+                                        if (response.ok) {
+                                            showNotification('Knowledge Base sync started successfully!', 'success');
+                                            console.log('Sync job ID:', data.ingestionJobId);
+                                        } else {
+                                            showNotification(`Failed to sync Knowledge Base: ${data.error}`, 'error');
+                                            console.error('Error details:', data.message);
+                                        }
+
+                                    } catch (error) {
+                                        console.error('Sync error:', error);
+                                        showNotification('Failed to connect to sync service', 'error');
+                                    } finally {
+                                        // Reset button state
+                                        syncButton.disabled = false;
+                                        syncButton.textContent = originalText;
+                                    }
+                                }
                                 
                                 function setProcessingState(processing) {
                                       isProcessing = processing;
@@ -1687,6 +1896,14 @@ Resources:
       AWSReg: !Ref AWS::Region
 
 Outputs:
+  DynamoDBTableName:
+    Description: 'Name of the created DynamoDB table for chat logs'
+    Value: !Ref ChatLogTable
+    
+  DynamoDBTableArn:
+    Description: 'ARN of the created DynamoDB table'
+    Value: !GetAtt ChatLogTable.Arn
+    
   S3Bucket:
     Value: !GetAtt S3Bucket.Arn
   S3BucketName:
