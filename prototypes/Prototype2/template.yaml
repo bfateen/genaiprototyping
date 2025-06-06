@@ -116,6 +116,16 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !GetAtt ChatLogTable.Arn
         - PolicyName: OpenSearchServerlessAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -130,12 +140,6 @@ Resources:
                   - 'aoss:ListCollections'
                   - 'aoss:DescribeCollection'
                 Resource: '*'
-              - Effect: Allow
-                Action:
-                  - dynamodb:PutItem
-                  - dynamodb:Query
-                  - dynamodb:Scan
-                Resource: !GetAtt ChatLogTable.Arn
               - Effect: Allow
                 Action:
                   - 'aoss:CreateIndex'
@@ -1023,7 +1027,7 @@ Resources:
               request_id = str(uuid.uuid4())
               timestamp = int(datetime.now().timestamp() * 1000)  # Milliseconds since epoch
               client_ip = event.get('requestContext', {}).get('identity', {}).get('sourceIp', 'unknown')
-              
+
               # Log the boto3 version
               try:
 
