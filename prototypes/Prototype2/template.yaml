@@ -744,6 +744,8 @@ Resources:
   # IAM Role for Lambda (unchanged)
   AgentLambdaExecutionRole:
     Type: AWS::IAM::Role
+    DependsOn:
+      - ChatLogTable
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -757,6 +759,16 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !GetAtt ChatLogTable.Arn
         - PolicyName: BedrockAccess
           PolicyDocument:
             Version: '2012-10-17'
