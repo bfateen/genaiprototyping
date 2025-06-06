@@ -1080,10 +1080,33 @@ Resources:
                   
                                   full_response += extract_result_from_raw_response(chunk['bytes'].decode('utf-8'))
                                   
-                      # Print trace events for debugging
+
+                      # Extract token usage from trace events
                       elif 'trace' in event_dict:
-                          print(f"Trace event: {json.dumps(event_dict['trace'])}")
+                          trace_data = event_dict['trace']
+                          print(f"Trace event: {json.dumps(trace_data)}")
+                          
+                          # Try to extract token usage from trace data
+                          trace_input, trace_output = extract_token_usage_from_trace(trace_data)
+                          if trace_input > 0 or trace_output > 0:
+                              input_tokens = trace_input
+                              output_tokens = trace_output
+                              print(f"Found token usage in trace: input={input_tokens}, output={output_tokens}")
                   
+                  # If we didn't find token usage in trace events, check response metadata
+                  if input_tokens == 0 and output_tokens == 0:
+                      # Check if usage is directly in the response
+                      if 'usage' in response:
+                          input_tokens = response['usage'].get('inputTokens', 0)
+                          output_tokens = response['usage'].get('outputTokens', 0)
+                          print(f"Found token usage in response: input={input_tokens}, output={output_tokens}")
+                      # Check if usage is in response metadata
+                      elif 'ResponseMetadata' in response:
+                          headers = response['ResponseMetadata'].get('HTTPHeaders', {})
+                          if 'x-amzn-bedrock-input-token-count' in headers:
+                              input_tokens = int(headers.get('x-amzn-bedrock-input-token-count', 0))
+                              output_tokens = int(headers.get('x-amzn-bedrock-output-token-count', 0))
+                              print(f"Found token usage in headers: input={input_tokens}, output={output_tokens}")
                       
                   if not full_response:
                       full_response = "Unable to process response. Please check CloudWatch logs."
