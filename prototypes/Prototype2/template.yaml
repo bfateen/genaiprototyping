@@ -795,6 +795,8 @@ Resources:
           from botocore.exceptions import ClientError
           import uuid
           import re
+          import time
+          from datetime import datetime
 
           def sync():
 
@@ -1017,8 +1019,16 @@ Resources:
               user_message = parseparam(event)
               session_id = str(uuid.uuid4())
 
+              start_time = time.time()
+              request_id = str(uuid.uuid4())
+              timestamp = int(datetime.now().timestamp() * 1000)  # Milliseconds since epoch
+              client_ip = event.get('requestContext', {}).get('identity', {}).get('sourceIp', 'unknown')
+              
               # Log the boto3 version
               try:
+
+                  bedrock_start_time = time.time()
+                  
                   # Send the message to the Bedrock agent with additional parameters
                   response = client.invoke_agent(
                       agentId=AGENT_ID, #'CYQACSRTBT',
@@ -1027,6 +1037,8 @@ Resources:
                       inputText=user_message,
                       enableTrace=True
                   )
+
+                  bedrock_latency = time.time() - bedrock_start_time
                   
                   enable_trace=True
                   # Process the event stream response
@@ -1062,6 +1074,33 @@ Resources:
                       
                   full_response = full_response.strip()
                   full_response = full_response.replace('\n', '<br>')
+
+                   # Extract token usage information from the response
+                  input_tokens = response.get("usage", {}).get("inputTokens", 0)
+                  output_tokens = response.get("usage", {}).get("outputTokens", 0)
+                  total_tokens = input_tokens + output_tokens
+                  
+                  
+                  
+                  # Calculate total latency
+                  total_latency = time.time() - start_time
+                  
+                  # Log successful request to DynamoDB
+                  log_to_dynamodb(
+                      request_id=request_id,
+                      timestamp=timestamp,
+                      user_message=user_message,
+                      bot_response=full_response,
+                      latency=total_latency,
+                      bedrock_latency=bedrock_latency,
+                      client_ip=client_ip,
+                      status_code=200,
+                      error=None,
+                      input_tokens=input_tokens,
+                      output_tokens=output_tokens,
+                      total_tokens=total_tokens,
+                      model_id=model_id
+                  )
                   
                   result = {
                       'message': 'Successfully sent message to Bedrock agent',
@@ -1903,7 +1942,7 @@ Outputs:
   DynamoDBTableArn:
     Description: 'ARN of the created DynamoDB table'
     Value: !GetAtt ChatLogTable.Arn
-    
+
   S3Bucket:
     Value: !GetAtt S3Bucket.Arn
   S3BucketName:
