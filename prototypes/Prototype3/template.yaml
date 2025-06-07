@@ -3,6 +3,38 @@ Description: 'Complete CloudFormation template for Lambda function with automati
 
 Resources:
 
+  # DynamoDB Table for Chat Logs
+  ChatLogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Join
+        - "-"
+        - - "bedrock-chat-logs"
+          - !Select
+            - 0
+            - !Split
+              - "-"
+              - !Select
+                - 2
+                - !Split
+                  - "/"
+                  - !Ref "AWS::StackId"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
    # Lambda Function for Chat
   LambdaExecutionRole1:
     Type: AWS::IAM::Role
@@ -19,6 +51,16 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !GetAtt ChatLogTable.Arn
         - PolicyName: BedrockAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -54,6 +96,7 @@ Resources:
         Variables:
           SNS_TOPIC_NAME: !Sub '${AWS::StackName}-notifications'
           DYNAMODB_TABLE_NAME: !Sub '${AWS::StackName}-results'
+          DYNAMODB_LOGS_TABLE_NAME: !Ref ChatLogTable
       FunctionName: !Join
       - "-"
       - - "bedrock-chat"
@@ -74,10 +117,81 @@ Resources:
             import boto3
             import uuid
             import os
+            import time
+            from datetime import datetime
             from botocore.exceptions import ClientError
 
             sns_topic_name = os.environ['SNS_TOPIC_NAME']
             dynamodb_table_name = os.environ['DYNAMODB_TABLE_NAME']
+            dynamodb_logs_table_name = os.environ['DYNAMODB_LOGS_TABLE_NAME']
+            
+
+            client_ip = 'NA'
+
+            def log_to_dynamodb(request_id, timestamp, user_message, bot_response, latency, client_ip, status_code, error=None, bedrock_latency=None, input_tokens=None, output_tokens=None, total_tokens=None, model_id=None, model_version=None):
+              """
+              Logs chat information to DynamoDB
+              """
+              try:
+                  # Initialize DynamoDB client
+                  dynamodb = boto3.resource('dynamodb')
+                  table_name = None
+                  
+                  # Get the DynamoDB table name from environment variables
+                  import os
+                  table_name = os.environ.get('DYNAMODB_LOGS_TABLE_NAME')
+                  
+                  # Use default name if environment variable not found
+                  if not table_name:
+                      # Default table name as fallback
+                      table_name = "bedrock-chat-logs"
+                      print(f"Warning: Using default table name: {table_name}")
+                  
+                  table = dynamodb.Table(table_name)
+                  
+                  # Create the item to store
+                  item = {
+                      'id': request_id,
+                      'timestamp': timestamp,
+                      'user_message': user_message[:1000] if user_message else "",  # Truncate if too long
+                      'bot_response': bot_response[:1000] if bot_response else "",  # Truncate if too long
+                      'latency_ms': int(latency * 1000),  # Convert to milliseconds
+                      'client_ip': client_ip,
+                      'status_code': status_code,
+                      'date': datetime.fromtimestamp(timestamp/1000).strftime('%Y-%m-%d'),
+                  }
+                  
+                  # Add optional fields if they exist
+                  if error:
+                      item['error'] = error[:1000]  # Truncate if too long
+                  
+                  if bedrock_latency is not None:
+                      item['bedrock_latency_ms'] = int(bedrock_latency * 1000)  # Convert to milliseconds
+                  
+                  # Add token usage information if available
+                  if input_tokens is not None:
+                      item['input_tokens'] = input_tokens
+                  
+                  if output_tokens is not None:
+                      item['output_tokens'] = output_tokens
+                      
+                  if total_tokens is not None:
+                      item['total_tokens'] = total_tokens
+                      
+                  # Add model information if available
+                  if model_id is not None:
+                      item['model_id'] = model_id
+                      
+                  if model_version is not None:
+                      item['model_version'] = model_version
+                  
+                  # Store in DynamoDB
+                  table.put_item(Item=item)
+                  print(f"Logged to DynamoDB: {request_id}")
+                  
+              except Exception as e:
+                  print(f"Error logging to DynamoDB: {str(e)}")
+                  # Don't re-raise the exception to avoid breaking the main function
 
             def create_table_if_not_exists():
                 dynamodb = boto3.client('dynamodb')
@@ -190,6 +304,12 @@ Resources:
                         ]
                     }
                 
+                start_time = time.time()
+                request_id = str(uuid.uuid4())
+                timestamp = int(datetime.now().timestamp() * 1000)
+                bedrock_start_time = time.time()
+                
+
                 # Call Nova using Converse API
                 response = bedrock.converse(
                     modelId='amazon.nova-pro-v1:0',
@@ -202,9 +322,39 @@ Resources:
 
                 print(json.dumps(response, indent=2, default=str))
 
+                bedrock_latency = time.time() - bedrock_start_time
+
+                input_tokens = response.get("usage", {}).get("inputTokens", 0)
+                output_tokens = response.get("usage", {}).get("outputTokens", 0)
+                total_tokens = input_tokens + output_tokens
+                
                 reasoning = response['output']['message']['content'][0]['text']
                 messages.append(response['output']['message'])
                 messages.append(message2)
+                
+                # Calculate total latency
+                total_latency = time.time() - start_time
+
+                bot_response = response['output']['message']['content'][0]['text']
+                
+                # Log successful request to DynamoDB
+                log_to_dynamodb(
+                    request_id=request_id,
+                    timestamp=timestamp,
+                    user_message=prompt,
+                    bot_response=bot_response,
+                    latency=total_latency,
+                    bedrock_latency=bedrock_latency,
+                    client_ip=client_ip,
+                    status_code=200,
+                    error=None,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    model_id=model_id
+                )
+
+                
 
                 response = bedrock.converse(
                     modelId='amazon.nova-pro-v1:0',
@@ -251,7 +401,7 @@ Resources:
                     email = body.get('email',None);
 
                     
-
+                    client_ip = event.get('requestContext', {}).get('identity', {}).get('sourceIp', 'unknown')
                     
                     # Create Bedrock Runtime client
                     bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
@@ -1919,6 +2069,14 @@ Resources:
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PlaywrightApi}/*/*/*'
 
 Outputs:
+
+  DynamoDBTableName:
+    Description: 'Name of the created DynamoDB table for chat logs'
+    Value: !Ref ChatLogTable
+    
+  DynamoDBTableArn:
+    Description: 'ARN of the created DynamoDB table'
+    Value: !GetAtt ChatLogTable.Arn
 
   FrontendURL:
     Description: URL for the S3 static website
