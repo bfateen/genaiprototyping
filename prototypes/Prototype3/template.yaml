@@ -308,11 +308,13 @@ Resources:
                 request_id = str(uuid.uuid4())
                 timestamp = int(datetime.now().timestamp() * 1000)
                 bedrock_start_time = time.time()
+
+                model_id = "amazon.nova-pro-v1:0"
                 
 
                 # Call Nova using Converse API
                 response = bedrock.converse(
-                    modelId='amazon.nova-pro-v1:0',
+                    modelId=model_id,
                     messages=messages,
                     inferenceConfig={
                     "temperature": 1,
@@ -355,9 +357,14 @@ Resources:
                 )
 
                 
+                start_time = time.time()
+                request_id = str(uuid.uuid4())
+                timestamp = int(datetime.now().timestamp() * 1000)
+                bedrock_start_time = time.time()
+
 
                 response = bedrock.converse(
-                    modelId='amazon.nova-pro-v1:0',
+                    modelId=model_id,
                     messages=messages,
                     inferenceConfig={
                     "temperature": 1,
@@ -369,6 +376,35 @@ Resources:
                 print("API Response structure:")
                 print(response['output']['message']['content'][0]['text'])
                 #print(json.dumps(response, indent=2, default=str))
+
+                bedrock_latency = time.time() - bedrock_start_time
+
+                input_tokens = response.get("usage", {}).get("inputTokens", 0)
+                output_tokens = response.get("usage", {}).get("outputTokens", 0)
+                total_tokens = input_tokens + output_tokens
+
+                # Calculate total latency
+                total_latency = time.time() - start_time
+
+                bot_response = response['output']['message']['content'][0]['text']
+                
+                # Log successful request to DynamoDB
+                log_to_dynamodb(
+                    request_id=request_id,
+                    timestamp=timestamp,
+                    user_message=prompt,
+                    bot_response=bot_response,
+                    latency=total_latency,
+                    bedrock_latency=bedrock_latency,
+                    client_ip=client_ip,
+                    status_code=200,
+                    error=None,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    model_id=model_id
+                )
+
 
                 change=False
                 # make text lowercase and then check if text contains the word 'Yes'
