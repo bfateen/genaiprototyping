@@ -1613,8 +1613,8 @@ Resources:
                             </style>
                         </head>
                         <body>
-                            <h1>Bedrock Chat</h1>
-                            <button id="sync-button" onclick="syncKnowledgeBase()">Sync Knowledge Base</button>
+                            <h1>Agent chat with documents  <button style="float:right;background:#64748b" id="sync-button" onclick="syncKnowledgeBase()">Sync Knowledge Base</button></h1>
+                            <!--<button id="sync-button" onclick="syncKnowledgeBase()">Sync Knowledge Base</button>-->
                             <div id="chat-container"></div>
                             <div id="loading">Assistant is typing...</div>
                             <div id="input-container">
