@@ -93,7 +93,7 @@ Resources:
           from datetime import datetime
 
           def lambda_handler(event, context):
-              model_id = "amazon.titan-text-premier-v1:0"
+              model_id = "amazon.nova-pro-v1:0"
               
               try:
                   # Start timing the request
