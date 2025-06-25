@@ -1175,14 +1175,33 @@ Resources:
                             pointer-events:none;
                             }
 
-                            .selbox {
-                                text-decoration:none;
-                                margin-left:5px;
-                            }
-
-                            .selbox.selected {
-                                text-decoration:underline
-                            }
+                                 .selbox {
+                                display: flex;
+                                gap: 8px;
+                                font-size: 0.9rem;
+                                font-weight: 500;
+                                justify-content: flex-end;
+                                align-items: center;
+                                margin-top: 4px;
+                              }
+                              
+                              .selbox a {
+                                color: #6b21a8; /* purple-800 */
+                                text-decoration: none;
+                                padding: 6px 12px;
+                                border-radius: 6px;
+                                transition: background 0.2s ease;
+                              }
+                              
+                              .selbox a.selected {
+                                background-color: #ede9fe;
+                                color: #4c1d95;
+                                font-weight: 600;
+                              }
+                              
+                              .selbox a:hover {
+                                background-color: #f3e8ff;
+                              }
 
                             </style>
                         <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
@@ -1195,7 +1214,7 @@ Resources:
                             <div id="input-container">
                                 <input type="text" id="website-input" placeholder="Enter website" style="min-width:50%">
                                 <button onclick="setWebsite()">Connect</button>
-                                <div style="flex:50%;text-align:right"><a class="selbox selected" data-target="chatsection" href="#">chat</a><a data-target="monitorsection" class="selbox" href="#">alarm</a></div>
+                                 <div style="flex:50%;text-align:right" class="selbox"><a class="selected" data-target="chatsection" href="#">Chat</a><a data-target="monitorsection" class="selbox" href="#">Monitor</a></div>
                             </div>
 
                             <div id="chatsection" class="sec">
@@ -1223,12 +1242,12 @@ Resources:
 
                                 $(document).ready(() => {
 
-                                $(document).on('click', '.selbox', function () {
+                                $(document).on('click', '.selbox a', function () {
 
                                     $('.sec').hide();
                                     $('#' + $(this).data('target')).show();
 
-                                    $('.selbox').removeClass('selected');
+                                    $('.selbox a').removeClass('selected');
                                     $(this).addClass('selected');
                                 });
 
