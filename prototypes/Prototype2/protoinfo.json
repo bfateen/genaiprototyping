@@ -29,6 +29,7 @@
             "outputs": []
         }
     ],
+    "requiredModels":["amazon.titan-embed-text-v1"],
           "custom_outputs": [
         {
             "id":"S3BucketLink",
