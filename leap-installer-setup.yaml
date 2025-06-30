@@ -1838,8 +1838,8 @@ Resources:
                         const computedStyle = window.getComputedStyle($(accordionItem).find('.video-container')[0]);
                         const height = parseFloat(computedStyle.height)+15;
                 
-                        $(accordionItem).find('.accordion-content').css('maxHeight', height+'px');
-                        $(accordionItem).find('.accordion-content').css('minHeight','400px');
+                        $(accordionItem).find('.accordion-item.active .accordion-content').css('maxHeight', height+'px');
+                        $(accordionItem).find('.accordion-item.active .accordion-content').css('minHeight','400px');
 
                 });
 
