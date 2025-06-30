@@ -20,7 +20,9 @@
             "desc": ""
         }
     ],
-    "estimatedCost": "Setup time: 7 minutes",
+    "estimatedCost": "$0.04/hr",
+    "estimatedTimeString": "Setup time: 7 minutes",
+    
     "estimatedSetupTime":500,
     "templates": [
         {
