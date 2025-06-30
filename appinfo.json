@@ -28,8 +28,8 @@
     },
     {
         "name": "API Gateway",
-        "term": "LEAP_APIGateway",
-        "videoURL": "https://www.youtube.com/embed/SlWJCTrMLOA?si=n9s1SRTFBkM9lmdX",
+        "term": "API Gateway",
+        "videoURL": "LEAP_APIGateway",
         "description": "Amazon API Gateway is a fully managed service that makes it easy to create, publish, maintain, monitor, and secure APIs at any scale. It acts as a 'front door' for applications to access data, business logic, or functionality from your backend services.",
         "links": ["https://docs.aws.amazon.com/apigateway/"]
     },
