@@ -1,6 +1,6 @@
 {
-    "title": "Full-stack Gen AI Chatbot",
-    "description": "Plug-and-play LLM chatbot application using Claude",
+    "title": "Basic Gen AI Chatbot",
+    "description": "Plug-and-play GenAI full-stack chatbot application",
     "fulldescription": "Your frontend web application has been created and hosted on Simple Storage Service (S3). This application communites with a Lambda function via API Gateway, which handles the sending and recieivng of messages with the Large Language Model on Amazon Bedrock.",
     "icon": "leapai_chat.png",
     "videoUrl": "Proto1.mp4",
