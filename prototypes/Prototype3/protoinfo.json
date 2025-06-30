@@ -20,8 +20,10 @@
             "desc": ""
         }
     ],
-    "estimatedCost": "Setup time: 2 minutes",
+    "estimatedCost": "$0.0003/hr",
+    "estimatedTimeString": "Setup time: 2 minutes",
     "estimatedSetupTime": 140,
+    "requiredModels":["amazon.nova-pro-v1:0"],
     "templates": [
         {
             "name":"template.yaml",
