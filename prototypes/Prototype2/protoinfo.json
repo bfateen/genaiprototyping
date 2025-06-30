@@ -1,9 +1,9 @@
 {
-    "title": "Chat with your documents with Knowledge Base",
+    "title": "Chat with your documents",
     "description": "A full-stack RAG application that enables intelligent document interactions.",
     "fulldescription": "A full-stack application that enables intelligent document interactions using Amazon Bedrock's Knowledge Base and Agent capabilities. This prototype demonstrates Retrieval-Augmented Generation (RAG) on Amazon Bedrock for building AI-powered document question-answering systems.",
-    "icon": "icon2.png",
-    "videoUrl": "https://example.com/video1",
+    "icon": "leapai_docs.png",
+    "videoUrl": "Proto2.mp4",
     "services": [
         {
             "name":"S3",
@@ -20,7 +20,10 @@
             "desc": ""
         }
     ],
-    "estimatedCost": "Setup time: 7 minutes",
+    "estimatedCost": "$0.04/hr",
+    "estimatedTimeString": "Setup time: 7 minutes",
+    "costDetailsHTML":"<div style=\"max-width:700px;margin:20px auto;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:15px;padding:25px;color:white;font-family:system-ui,-apple-system,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,0.2)\"><div style=\"text-align:center;margin-bottom:20px\"><h3 style=\"margin:0 0 10px 0;font-size:1.8rem;font-weight:700\">AWS RAG Chat Application</h3><div style=\"background:rgba(255,255,255,0.2);padding:15px;border-radius:10px\"><div style=\"font-size:2.2rem;font-weight:900;margin:0\">$30-80/hr</div><div style=\"font-size:1.1rem;opacity:0.9\">$21,600-57,600/month</div><div style=\"font-size:0.85rem;margin-top:8px;font-style:italic\">*Includes AI model & infrastructure costs</div></div></div><div style=\"display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px\"><div style=\"background:rgba(255,255,255,0.15);padding:15px;border-radius:10px;border-left:4px solid #ff6b6b\"><div style=\"font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px\"><span style=\"background:#ff6b6b;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.7rem\">🔍</span>OpenSearch</div><div style=\"font-size:1.2rem;font-weight:700\">~$17-40/hr</div><div style=\"font-size:0.8rem;opacity:0.9\">Vector storage, 2-4 OCUs minimum</div></div><div style=\"background:rgba(255,255,255,0.15);padding:15px;border-radius:10px;border-left:4px solid #4ecdc4\"><div style=\"font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px\"><span style=\"background:#4ecdc4;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.7rem\">🧠</span>Bedrock AI</div><div style=\"font-size:1.2rem;font-weight:700\">~$10-35/hr</div><div style=\"font-size:0.8rem;opacity:0.9\">Agent + Knowledge Base queries</div></div><div style=\"background:rgba(255,255,255,0.15);padding:15px;border-radius:10px;border-left:4px solid #45b7d1\"><div style=\"font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px\"><span style=\"background:#45b7d1;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.7rem\">λ</span>Lambda + API</div><div style=\"font-size:1.2rem;font-weight:700\">~$0.004/hr</div><div style=\"font-size:0.8rem;opacity:0.9\">Function execution + gateway</div></div><div style=\"background:rgba(255,255,255,0.15);padding:15px;border-radius:10px;border-left:4px solid #96ceb4\"><div style=\"font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px\"><span style=\"background:#96ceb4;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.7rem\">📊</span>Storage</div><div style=\"font-size:1.2rem;font-weight:700\">~$3-5/hr</div><div style=\"font-size:0.8rem;opacity:0.9\">S3 + DynamoDB + logs</div></div></div><div style=\"background:rgba(255,255,255,0.1);padding:15px;border-radius:10px;margin-top:20px\"><div style=\"font-weight:600;margin-bottom:10px;font-size:1rem\">💡 Cost Drivers & Scenarios</div><div style=\"display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;font-size:0.85rem\"><div><strong>Dev/Test:</strong><br>~$30-40/hr<br>Half OCUs enabled</div><div><strong>Production:</strong><br>~$50-80/hr<br>Full redundancy + scale</div><div><strong>High Traffic:</strong><br>~$100+/hr<br>Heavy AI usage</div></div></div><div style=\"background:rgba(255,255,255,0.1);padding:15px;border-radius:10px;margin-top:15px\"><div style=\"font-weight:600;margin-bottom:8px;font-size:0.95rem\">⚠️ Key Considerations</div><div style=\"font-size:0.8rem;line-height:1.4\">• OpenSearch Serverless has <strong>minimum 2-4 OCUs</strong> ($17-34/hr baseline)<br>• AI costs scale with query volume & complexity<br>• Dev mode can halve OpenSearch costs<br>• Consider Provisioned Throughput for predictable AI workloads</div></div><div style=\"text-align:center;margin-top:15px;font-size:0.85rem;opacity:0.8\">🎯 Enterprise RAG • 🤖 AI Agents • 📚 Knowledge Base</div></div>",
+    "estimatedSetupTime":500,
     "templates": [
         {
             "name":"template.yaml",
@@ -28,6 +31,7 @@
             "outputs": []
         }
     ],
+    "requiredModels":["amazon.titan-embed-text-v1"],
           "custom_outputs": [
         {
             "id":"S3BucketLink",
