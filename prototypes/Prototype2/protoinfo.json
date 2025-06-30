@@ -3,7 +3,7 @@
     "description": "A full-stack RAG application that enables intelligent document interactions.",
     "fulldescription": "A full-stack application that enables intelligent document interactions using Amazon Bedrock's Knowledge Base and Agent capabilities. This prototype demonstrates Retrieval-Augmented Generation (RAG) on Amazon Bedrock for building AI-powered document question-answering systems.",
     "icon": "leapai_docs.png",
-    "videoUrl": "https://example.com/video1",
+    "videoUrl": "Proto2.mp4",
     "services": [
         {
             "name":"S3",
