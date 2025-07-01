@@ -721,7 +721,7 @@ Resources:
       AgentResourceRoleArn: !GetAtt AmazonBedrockExecutionRoleForAgentsQA5.Arn
       AutoPrepare: true
       FoundationModel: "amazon.nova-pro-v1:0"
-      Instruction: "You are a helpful assistant"
+      Instruction: "You are a helpful assistant who can answer questions about a broad range of topics and information that you have access to"
       Description: "AI Agent Bot powered by Amazon Bedrock"
       IdleSessionTTLInSeconds: 900
       MemoryConfiguration:
