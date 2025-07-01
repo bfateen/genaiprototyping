@@ -721,7 +721,7 @@ Resources:
       AgentResourceRoleArn: !GetAtt AmazonBedrockExecutionRoleForAgentsQA5.Arn
       AutoPrepare: true
       FoundationModel: "amazon.nova-pro-v1:0"
-      Instruction: "You are a helpful assistant with a broad range of experience to help plan various tasks."
+      Instruction: "You are a helpful assistant"
       Description: "AI Agent Bot powered by Amazon Bedrock"
       IdleSessionTTLInSeconds: 900
       MemoryConfiguration:
@@ -1050,6 +1050,9 @@ Resources:
               user_message = parseparam(event)
               session_id = str(uuid.uuid4())
 
+              if 'sessionid' in body and body['sessionid']:
+                session_id = body['sessionid']
+
               start_time = time.time()
               request_id = str(uuid.uuid4())
               timestamp = int(datetime.now().timestamp() * 1000)  # Milliseconds since epoch
@@ -1064,7 +1067,7 @@ Resources:
                   response = client.invoke_agent(
                       agentId=AGENT_ID, #'CYQACSRTBT',
                       agentAliasId=ALIAS_ID, 
-                      sessionId='1234567',
+                      sessionId=session_id,
                       inputText=user_message,
                       enableTrace=True
                   )
@@ -1622,6 +1625,16 @@ Resources:
                                 <button id="send-button" onclick="sendMessage()">Send</button>
                             </div>
                             <script>
+                                function generateSessionString() {
+                                    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+                                    let result = '';
+                                    for (let i = 0; i < 8; i++) {
+                                        result += chars.charAt(Math.floor(Math.random() * chars.length));
+                                    }
+                                    return result;
+                                }          
+
+                                var sessionid = generateSessionString();
                                 const apiUrl = 'AAAAA.execute-api.RRRR.amazonaws.com/prod/chat';
                                 const messageInput = document.getElementById('message-input');
                                 const chatContainer = document.getElementById('chat-container');
@@ -1716,6 +1729,8 @@ Resources:
                                     const originalText = syncButton.textContent;
                                     syncButton.disabled = true;
                                     syncButton.textContent = 'Syncing...';
+                                    
+                                    sessionid = generateSessionString();
 
                                     // API Gateway endpoint for Knowledge Base sync
 
@@ -1865,7 +1880,7 @@ Resources:
                                               headers: {
                                                   'Content-Type': 'application/json'
                                               },
-                                              body: JSON.stringify({ message: message })
+                                              body: JSON.stringify({ message: message, sessionid: sessionid })
                                           });
 
                                           const responseData = await response.json();
