@@ -2,6 +2,78 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: 'CloudFormation template for Bedrock Chat application with Lambda, API Gateway, DynamoDB, and S3 static website'
 
 Resources:
+
+
+  ApiKeyGeneratorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ApiKeyGeneratorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt ApiKeyGeneratorRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import random
+          import string
+          import json
+          
+          def generate_api_key(length=20):
+              """Generate a random alphanumeric string of specified length"""
+              characters = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
+              return ''.join(random.choice(characters) for _ in range(length))
+          
+          def handler(event, context):
+              print(f"Received event: {json.dumps(event)}")
+              
+              try:
+                  if event['RequestType'] == 'Create':
+                      # Generate custom 20-character API key
+                      custom_key = generate_api_key(20)
+                      
+                      responseData = {
+                          'ApiKeyValue': custom_key
+                      }
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, custom_key)
+                      
+                  elif event['RequestType'] == 'Delete':
+                      # Nothing to clean up for our custom key
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      
+                  else:  # Update
+                      # Keep the same key on updates
+                      existing_key = event.get('PhysicalResourceId', generate_api_key(20))
+                      responseData = {
+                          'ApiKeyValue': existing_key
+                      }
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, existing_key)
+                      
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+      Runtime: python3.9
+      Timeout: 60
+
+  # Custom API Key Resource
+  CustomAPIKey:
+    Type: Custom::APIKey
+    Properties:
+      ServiceToken: !GetAtt ApiKeyGeneratorFunction.Arn
+      StackName: !Ref AWS::StackName
+
   # DynamoDB Table for Chat Logs
   ChatLogTable:
     Type: AWS::DynamoDB::Table
@@ -100,6 +172,46 @@ Resources:
                   start_time = time.time()
                   request_id = str(uuid.uuid4())
                   timestamp = int(datetime.now().timestamp() * 1000)  # Milliseconds since epoch
+
+                  # Get the expected API key from environment
+                  expected_api_key = os.environ.get('API_KEY')
+                  
+                  # Extract API key from headers
+                  headers = event.get('headers', {})
+                  # Handle case-insensitive header lookup
+                  provided_api_key = None
+                  for header_name, header_value in headers.items():
+                      if header_name.lower() == 'x-api-key':
+                          provided_api_key = header_value
+                          break
+                  
+                  client_ip = event.get('requestContext', {}).get('identity', {}).get('sourceIp', 'unknown')
+                  
+                  # Validate API key
+                  if not provided_api_key or provided_api_key != expected_api_key:
+                      error_response = {
+                          'statusCode': 401,
+                          'headers': {
+                              'Access-Control-Allow-Origin': '*',
+                              'Access-Control-Allow-Headers': 'Content-Type,X-API-Key',
+                              'Access-Control-Allow-Methods': 'OPTIONS,POST'
+                          },
+                          'body': json.dumps({'error': 'Invalid or missing API key'})
+                      }
+                      
+                      # Log unauthorized access attempt
+                      log_to_dynamodb(
+                          request_id=request_id,
+                          timestamp=timestamp,
+                          user_message="",
+                          bot_response="",
+                          latency=time.time() - start_time,
+                          client_ip=client_ip,
+                          status_code=401,
+                          error="Invalid or missing API key"
+                      )
+                      
+                      return error_response
                   
                   # Parse the incoming message from the request body
                   body = event.get('body', '{}')
@@ -114,7 +226,7 @@ Resources:
                           'statusCode': 400,
                           'headers': {
                               'Access-Control-Allow-Origin': '*',
-                              'Access-Control-Allow-Headers': 'Content-Type',
+                              'Access-Control-Allow-Headers': 'Content-Type,X-API-Key',
                               'Access-Control-Allow-Methods': 'OPTIONS,POST'
                           },
                           'body': json.dumps({'error': 'No message provided'})
@@ -328,6 +440,7 @@ Resources:
       Environment:
         Variables:
           DYNAMODB_TABLE_NAME: !Ref ChatLogTable
+          API_KEY: !GetAtt CustomAPIKey.ApiKeyValue
 
   # API Gateway
   ChatAPI:
@@ -642,6 +755,7 @@ Resources:
                       bucket_name = event['ResourceProperties']['BucketName']
                       api_gateway = event['ResourceProperties']['ApiGateway']
                       aws_region = event['ResourceProperties']['AWSReg']
+                      api_key_value = event['ResourceProperties']['ApiKeyValue']
                       
                       # HTML content
                       html_content = """
@@ -722,6 +836,7 @@ Resources:
                           </div>
                           <script>
                               const apiUrl = 'AAAAA.execute-api.RRRR.amazonaws.com/prod/chat';
+                              const apiKey = 'APIKEY_PLACEHOLDER';
                               const messageInput = document.getElementById('message-input');
                               const chatContainer = document.getElementById('chat-container');
                               const loadingIndicator = document.getElementById('loading');
@@ -744,14 +859,20 @@ Resources:
                                       const response = await fetch('https://' + apiUrl, {
                                           method: 'POST',
                                           headers: {
-                                              'Content-Type': 'application/json'
+                                              'Content-Type': 'application/json',
+                                              'X-API-Key': apiKey
                                           },
                                           body: JSON.stringify({ message: message })
                                       });
                                       
                                       const data = await response.json();
                                       loadingIndicator.style.display = 'none';
-                                      appendMessageToChat(data.content[0]['text'], 'assistant');
+                                      
+                                      if (response.ok) {
+                                          appendMessageToChat(data.content[0]['text'], 'assistant');
+                                      } else {
+                                          appendMessageToChat('Error: ' + (data.error || 'Failed to get response'), 'assistant');
+                                      }
                                   } catch (error) {
                                       console.error('Error:', error);
                                       loadingIndicator.style.display = 'none';
@@ -773,6 +894,7 @@ Resources:
                       
                       html_content = html_content.replace('AAAAA', api_gateway)
                       html_content = html_content.replace('RRRR', aws_region)
+                      html_content = html_content.replace('APIKEY_PLACEHOLDER', api_key_value)
 
                       # Upload the HTML file
                       s3.put_object(
@@ -812,8 +934,13 @@ Resources:
       BucketName: !Ref PrivateS3Bucket
       ApiGateway: !Ref ChatAPI
       AWSReg: !Ref AWS::Region
+      ApiKeyValue: !GetAtt CustomAPIKey.ApiKeyValue
 
 Outputs:
+  ApiKeyValue:
+    Description: 'API Key Value (20-character alphanumeric)'
+    Value: !GetAtt CustomAPIKey.ApiKeyValue
+
   DynamoDBTableName:
     Description: 'Name of the created DynamoDB table for chat logs'
     Value: !Ref ChatLogTable
