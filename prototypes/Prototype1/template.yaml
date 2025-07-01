@@ -162,6 +162,7 @@ Resources:
           import boto3
           import time
           import uuid
+          import os
           from datetime import datetime
 
           def lambda_handler(event, context):
