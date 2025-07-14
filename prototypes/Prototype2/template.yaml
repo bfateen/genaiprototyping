@@ -1069,7 +1069,7 @@ Resources:
                       agentAliasId=ALIAS_ID, 
                       sessionId=session_id,
                       inputText=user_message,
-                      enableTrace=True
+                      enableTrace=False
                   )
 
                   bedrock_latency = time.time() - bedrock_start_time
